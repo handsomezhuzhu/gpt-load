@@ -233,8 +233,14 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 		return fmt.Errorf("failed to get key details from store: %w", err)
 	}
 
-	if keyDetails["status"] == models.KeyStatusInvalid || keyDetails["status"] == models.KeyStatusCooldown {
+	if keyDetails["status"] == models.KeyStatusCooldown {
 		return nil
+	}
+
+	// 手动测试/校验路径没有单独传入状态码，尝试从错误消息中提取
+	// （channel 校验错误格式："[status 429] ..."），以便正确识别致命错误。
+	if statusCode == 0 {
+		statusCode = app_errors.ParseStatusCodeFromError(errorMessage)
 	}
 
 	failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)

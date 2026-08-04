@@ -12,6 +12,28 @@ const maxCooldown = 30 * 24 * time.Hour
 
 var durationPartRe = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(months?|weeks?|days?|hours?|hrs?|h\b|minutes?|mins?|m\b|seconds?|secs?|s\b|ms\b)`)
 
+// statusCodeInMessageRe matches the "[status 429]" prefix that channel
+// validation errors carry (e.g. openai_channel.go: "[status %d] %s").
+var statusCodeInMessageRe = regexp.MustCompile(`\[status\s+(\d{3})\]`)
+
+// ParseStatusCodeFromError extracts an HTTP status code embedded in an error
+// message produced by channel validation ("[status 429] ..."). Returns 0 when
+// no status code is present.
+func ParseStatusCodeFromError(message string) int {
+	if message == "" {
+		return 0
+	}
+	m := statusCodeInMessageRe.FindStringSubmatch(message)
+	if len(m) != 2 {
+		return 0
+	}
+	code, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
+	}
+	return code
+}
+
 var resetKeywords = []string{
 	"resets in ",
 	"reset in ",

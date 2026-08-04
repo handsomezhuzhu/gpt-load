@@ -44,3 +44,21 @@ func TestParseCooldownDurationMaxCap(t *testing.T) {
 		t.Fatalf("expected cap at %v, got %v", maxCooldown, got)
 	}
 }
+
+func TestParseStatusCodeFromError(t *testing.T) {
+	cases := []struct {
+		message string
+		want    int
+	}{
+		{"[status 429] Weekly usage limit reached.", 429},
+		{"[status 403] The latest version of this model is only available hosted in China", 403},
+		{"[status 500] Router.Unavailable", 500},
+		{"Weekly usage limit reached", 0},
+		{"", 0},
+	}
+	for _, tc := range cases {
+		if got := ParseStatusCodeFromError(tc.message); got != tc.want {
+			t.Fatalf("ParseStatusCodeFromError(%q) = %d, want %d", tc.message, got, tc.want)
+		}
+	}
+}
