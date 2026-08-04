@@ -1108,6 +1108,7 @@ function resetPage() {
 .cooldown-remaining {
   color: #f5a623;
   font-size: 12px;
+  flex-basis: 100%;
 }
 
 .key-card.status-error {
@@ -1141,7 +1142,8 @@ function resetPage() {
 
 .key-stats {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-size: 12px;
   overflow: hidden;
   color: var(--text-secondary);
