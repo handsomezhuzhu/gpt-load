@@ -98,8 +98,24 @@ func (p *KeyProvider) SelectKey(groupID uint, strategy string) (*models.APIKey, 
 	return apiKey, nil
 }
 
+// BlacklistKeyImmediately 同步地将密钥从活跃池中移除并标记为无效。
+// 用于致命错误（429/401/403 等）：立即生效，确保下一次重试/请求不会再次选中该密钥。
+func (p *KeyProvider) BlacklistKeyImmediately(apiKey *models.APIKey, group *models.Group) error {
+	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", group.ID)
+	keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
+
+	if err := p.store.LRem(activeKeysListKey, 0, apiKey.ID); err != nil {
+		return fmt.Errorf("failed to LRem key from active list: %w", err)
+	}
+	if err := p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusInvalid}); err != nil {
+		return fmt.Errorf("failed to update key status to invalid in store: %w", err)
+	}
+	return nil
+}
+
 // UpdateStatus 异步地提交一个 Key 状态更新任务。
-func (p *KeyProvider) UpdateStatus(apiKey *models.APIKey, group *models.Group, isSuccess bool, errorMessage string) {
+// statusCode 为上游 HTTP 状态码（如 429），用于识别致命错误（额度耗尽、限流等）以立即拉黑密钥。
+func (p *KeyProvider) UpdateStatus(apiKey *models.APIKey, group *models.Group, isSuccess bool, statusCode int, errorMessage string) {
 	go func() {
 		keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
 		activeKeysListKey := fmt.Sprintf("group:%d:active_keys", group.ID)
@@ -115,7 +131,7 @@ func (p *KeyProvider) UpdateStatus(apiKey *models.APIKey, group *models.Group, i
 					"error": errorMessage,
 				}).Debug("Uncounted error, skipping failure handling")
 			} else {
-				if err := p.handleFailure(apiKey, group, keyHashKey, activeKeysListKey); err != nil {
+				if err := p.handleFailure(apiKey, group, statusCode, errorMessage, keyHashKey, activeKeysListKey); err != nil {
 					logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to handle key failure")
 				}
 			}
@@ -196,7 +212,7 @@ func (p *KeyProvider) handleSuccess(keyID uint, keyHashKey, activeKeysListKey st
 	})
 }
 
-func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, keyHashKey, activeKeysListKey string) error {
+func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, statusCode int, errorMessage string, keyHashKey, activeKeysListKey string) error {
 	keyDetails, err := p.store.HGetAll(keyHashKey)
 	if err != nil {
 		return fmt.Errorf("failed to get key details from store: %w", err)
@@ -211,6 +227,10 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 	// 获取该分组的有效配置
 	blacklistThreshold := group.EffectiveConfig.BlacklistThreshold
 
+	// 致命错误（429 限流/额度耗尽、401 认证失败、403 禁止等）立即拉黑密钥，
+	// 无需等待失败次数累计到阈值，避免继续轮询到已不可用的密钥。
+	isFatal := app_errors.IsFatalKeyError(statusCode, errorMessage)
+
 	return p.executeTransactionWithRetry(func(tx *gorm.DB) error {
 		var key models.APIKey
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&key, apiKey.ID).Error; err != nil {
@@ -220,7 +240,7 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 		newFailureCount := failureCount + 1
 
 		updates := map[string]any{"failure_count": newFailureCount}
-		shouldBlacklist := blacklistThreshold > 0 && newFailureCount >= int64(blacklistThreshold)
+		shouldBlacklist := isFatal || (blacklistThreshold > 0 && newFailureCount >= int64(blacklistThreshold))
 		if shouldBlacklist {
 			updates["status"] = models.KeyStatusInvalid
 		}
@@ -234,7 +254,11 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 		}
 
 		if shouldBlacklist {
-			logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "threshold": blacklistThreshold}).Warn("Key has reached blacklist threshold, disabling.")
+			if isFatal {
+				logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "statusCode": statusCode}).Warn("Key hit fatal error, blacklisting immediately.")
+			} else {
+				logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "threshold": blacklistThreshold}).Warn("Key has reached blacklist threshold, disabling.")
+			}
 			if err := p.store.LRem(activeKeysListKey, 0, apiKey.ID); err != nil {
 				return fmt.Errorf("failed to LRem key from active list: %w", err)
 			}
