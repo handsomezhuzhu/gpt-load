@@ -24,6 +24,14 @@ type KeyProvider struct {
 	encryptionSvc   encryption.Service
 }
 
+// CooldownUntilField is the hash field storing the unix timestamp until which
+// a blacklisted key should not be revived by the cron checker.
+const CooldownUntilField = "cooldown_until"
+
+// DefaultFatalCooldown is used when a fatal error message carries no
+// parseable reset time, to avoid reviving a dead key every cron cycle.
+const DefaultFatalCooldown = 1 * time.Hour
+
 // NewProvider 创建一个新的 KeyProvider 实例。
 func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemSettingsManager, encryptionSvc encryption.Service) *KeyProvider {
 	return &KeyProvider{
@@ -189,6 +197,10 @@ func (p *KeyProvider) handleSuccess(keyID uint, keyHashKey, activeKeysListKey st
 		if !isActive {
 			updates["status"] = models.KeyStatusActive
 		}
+		// 密钥已恢复，清除冷却标记（若存在）
+		if keyDetails[CooldownUntilField] != "" && keyDetails[CooldownUntilField] != "0" {
+			updates[CooldownUntilField] = 0
+		}
 
 		if err := tx.Model(&key).Updates(updates).Error; err != nil {
 			return fmt.Errorf("failed to update key in DB: %w", err)
@@ -231,6 +243,16 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 	// 无需等待失败次数累计到阈值，避免继续轮询到已不可用的密钥。
 	isFatal := app_errors.IsFatalKeyError(statusCode, errorMessage)
 
+	// 解析上游错误消息中的恢复时间（如 "Resets in 5 days"），
+	// 使 CronChecker 在冷却期内不复活该密钥。
+	var cooldown time.Duration
+	if isFatal {
+		cooldown = app_errors.ParseCooldownDuration(errorMessage)
+		if cooldown == 0 {
+			cooldown = DefaultFatalCooldown
+		}
+	}
+
 	return p.executeTransactionWithRetry(func(tx *gorm.DB) error {
 		var key models.APIKey
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&key, apiKey.ID).Error; err != nil {
@@ -255,14 +277,18 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 
 		if shouldBlacklist {
 			if isFatal {
-				logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "statusCode": statusCode}).Warn("Key hit fatal error, blacklisting immediately.")
+				logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "statusCode": statusCode, "cooldown": cooldown}).Warn("Key hit fatal error, blacklisting immediately.")
 			} else {
 				logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "threshold": blacklistThreshold}).Warn("Key has reached blacklist threshold, disabling.")
 			}
 			if err := p.store.LRem(activeKeysListKey, 0, apiKey.ID); err != nil {
 				return fmt.Errorf("failed to LRem key from active list: %w", err)
 			}
-			if err := p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusInvalid}); err != nil {
+			storeUpdates := map[string]any{"status": models.KeyStatusInvalid}
+			if isFatal && cooldown > 0 {
+				storeUpdates[CooldownUntilField] = time.Now().Add(cooldown).Unix()
+			}
+			if err := p.store.HSet(keyHashKey, storeUpdates); err != nil {
 				return fmt.Errorf("failed to update key status to invalid in store: %w", err)
 			}
 		}
@@ -590,6 +616,8 @@ func (p *KeyProvider) addKeyToStore(key *models.APIKey) error {
 	// 1. Store key details in HASH
 	keyHashKey := fmt.Sprintf("key:%d", key.ID)
 	keyDetails := p.apiKeyToMap(key)
+	// 恢复/新增的密钥清除冷却标记
+	keyDetails[CooldownUntilField] = 0
 	if err := p.store.HSet(keyHashKey, keyDetails); err != nil {
 		return fmt.Errorf("failed to HSet key details for key %d: %w", key.ID, err)
 	}

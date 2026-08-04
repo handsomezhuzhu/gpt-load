@@ -2,9 +2,12 @@ package keypool
 
 import (
 	"context"
+	"fmt"
 	"gpt-load/internal/config"
 	"gpt-load/internal/encryption"
 	"gpt-load/internal/models"
+	"gpt-load/internal/store"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +19,7 @@ import (
 // NewCronChecker is responsible for periodically validating invalid keys.
 type CronChecker struct {
 	DB              *gorm.DB
+	Store           store.Store
 	SettingsManager *config.SystemSettingsManager
 	Validator       *KeyValidator
 	EncryptionSvc   encryption.Service
@@ -26,12 +30,14 @@ type CronChecker struct {
 // NewCronChecker creates a new CronChecker.
 func NewCronChecker(
 	db *gorm.DB,
+	store store.Store,
 	settingsManager *config.SystemSettingsManager,
 	validator *KeyValidator,
 	encryptionSvc encryption.Service,
 ) *CronChecker {
 	return &CronChecker{
 		DB:              db,
+		Store:           store,
 		SettingsManager: settingsManager,
 		Validator:       validator,
 		EncryptionSvc:   encryptionSvc,
@@ -123,6 +129,32 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 		logrus.Errorf("CronChecker: Failed to get invalid keys for group %s: %v", group.Name, err)
 		return
 	}
+
+	// 过滤掉仍处于冷却期的密钥（如额度耗尽 "Resets in 5 days"），
+	// 冷却期内不发送校验请求，避免死密钥被周期性复活造成请求抖动。
+	now := time.Now()
+	var pendingKeys []models.APIKey
+	for i := range invalidKeys {
+		key := &invalidKeys[i]
+		keyHashKey := fmt.Sprintf("key:%d", key.ID)
+		details, err := s.Store.HGetAll(keyHashKey)
+		if err != nil {
+			logrus.WithField("keyID", key.ID).WithError(err).Debug("CronChecker: Failed to read key cooldown, validating anyway")
+			pendingKeys = append(pendingKeys, invalidKeys[i])
+			continue
+		}
+		cooldownUntil, parseErr := strconv.ParseInt(details[CooldownUntilField], 10, 64)
+		if parseErr == nil && cooldownUntil > now.Unix() {
+			logrus.WithFields(logrus.Fields{
+				"key_id":     key.ID,
+				"group_name": group.Name,
+				"cooldown_until": time.Unix(cooldownUntil, 0).Format(time.RFC3339),
+			}).Debug("CronChecker: Skipping key in cooldown period")
+			continue
+		}
+		pendingKeys = append(pendingKeys, invalidKeys[i])
+	}
+	invalidKeys = pendingKeys
 
 	if len(invalidKeys) == 0 {
 		if err := s.DB.Model(group).Update("last_validated_at", time.Now()).Error; err != nil {
