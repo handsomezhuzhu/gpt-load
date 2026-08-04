@@ -18,7 +18,7 @@ import (
 func (s *Server) Stats(c *gin.Context) {
 	var activeKeys, invalidKeys int64
 	s.DB.Model(&models.APIKey{}).Where("status = ?", models.KeyStatusActive).Count(&activeKeys)
-	s.DB.Model(&models.APIKey{}).Where("status = ?", models.KeyStatusInvalid).Count(&invalidKeys)
+	s.DB.Model(&models.APIKey{}).Where("status IN ?", []string{models.KeyStatusInvalid, models.KeyStatusCooldown}).Count(&invalidKeys)
 
 	now := time.Now()
 	rpmStats, err := s.getRPMStats(now)

@@ -242,7 +242,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		// 致命错误（429 限流/额度耗尽、401、403 等）：同步立即拉黑密钥，
 		// 确保后续重试/请求立即切换到下一个密钥，而不是继续轮询该不可用的密钥。
 		if app_errors.IsFatalKeyError(statusCode, parsedError) {
-			if err := ps.keyProvider.BlacklistKeyImmediately(apiKey, group); err != nil {
+			cooldown := app_errors.ParseCooldownDuration(parsedError)
+			if cooldown == 0 {
+				cooldown = keypool.DefaultFatalCooldown
+			}
+			if err := ps.keyProvider.BlacklistKeyImmediately(apiKey, group, cooldown); err != nil {
 				logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to immediately blacklist key after fatal error")
 			}
 		}

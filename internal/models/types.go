@@ -12,6 +12,9 @@ import (
 const (
 	KeyStatusActive  = "active"
 	KeyStatusInvalid = "invalid"
+	// KeyStatusCooldown 表示密钥因限流/额度耗尽被临时禁用，
+	// 在冷却时间（cooldown_until）到期前不会被 CronChecker 复活。
+	KeyStatusCooldown = "cooldown"
 )
 
 // Key选择策略
@@ -130,8 +133,10 @@ type APIKey struct {
 	RequestCount int64      `gorm:"not null;default:0" json:"request_count"`
 	FailureCount int64      `gorm:"not null;default:0" json:"failure_count"`
 	LastUsedAt   *time.Time `gorm:"index:idx_api_keys_group_last_used_id,priority:2" json:"last_used_at"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// CooldownUntil 为 unix 秒时间戳，密钥处于 cooldown 状态时的冷却截止时间，0 表示无冷却
+	CooldownUntil int64     `gorm:"not null;default:0" json:"cooldown_until"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // RequestType 请求类型常量

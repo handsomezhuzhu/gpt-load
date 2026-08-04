@@ -124,7 +124,7 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 	groupProcessStart := time.Now()
 
 	var invalidKeys []models.APIKey
-	err := s.DB.Where("group_id = ? AND status = ?", group.ID, models.KeyStatusInvalid).Find(&invalidKeys).Error
+	err := s.DB.Where("group_id = ? AND status IN ?", group.ID, []string{models.KeyStatusInvalid, models.KeyStatusCooldown}).Find(&invalidKeys).Error
 	if err != nil {
 		logrus.Errorf("CronChecker: Failed to get invalid keys for group %s: %v", group.Name, err)
 		return

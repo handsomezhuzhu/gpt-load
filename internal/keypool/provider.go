@@ -106,16 +106,23 @@ func (p *KeyProvider) SelectKey(groupID uint, strategy string) (*models.APIKey, 
 	return apiKey, nil
 }
 
-// BlacklistKeyImmediately 同步地将密钥从活跃池中移除并标记为无效。
+// BlacklistKeyImmediately 同步地将密钥从活跃池中移除并标记为冷却/无效。
 // 用于致命错误（429/401/403 等）：立即生效，确保下一次重试/请求不会再次选中该密钥。
-func (p *KeyProvider) BlacklistKeyImmediately(apiKey *models.APIKey, group *models.Group) error {
+// cooldown > 0 时标记为 cooldown 状态并记录冷却截止时间，否则标记为 invalid。
+func (p *KeyProvider) BlacklistKeyImmediately(apiKey *models.APIKey, group *models.Group, cooldown time.Duration) error {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", group.ID)
 	keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
 
 	if err := p.store.LRem(activeKeysListKey, 0, apiKey.ID); err != nil {
 		return fmt.Errorf("failed to LRem key from active list: %w", err)
 	}
-	if err := p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusInvalid}); err != nil {
+
+	updates := map[string]any{"status": models.KeyStatusInvalid}
+	if cooldown > 0 {
+		updates["status"] = models.KeyStatusCooldown
+		updates[CooldownUntilField] = time.Now().Add(cooldown).Unix()
+	}
+	if err := p.store.HSet(keyHashKey, updates); err != nil {
 		return fmt.Errorf("failed to update key status to invalid in store: %w", err)
 	}
 	return nil
@@ -193,13 +200,9 @@ func (p *KeyProvider) handleSuccess(keyID uint, keyHashKey, activeKeysListKey st
 			return fmt.Errorf("failed to lock key %d for update: %w", keyID, err)
 		}
 
-		updates := map[string]any{"failure_count": 0}
+		updates := map[string]any{"failure_count": 0, "cooldown_until": 0}
 		if !isActive {
 			updates["status"] = models.KeyStatusActive
-		}
-		// 密钥已恢复，清除冷却标记（若存在）
-		if keyDetails[CooldownUntilField] != "" && keyDetails[CooldownUntilField] != "0" {
-			updates[CooldownUntilField] = 0
 		}
 
 		if err := tx.Model(&key).Updates(updates).Error; err != nil {
@@ -230,7 +233,7 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 		return fmt.Errorf("failed to get key details from store: %w", err)
 	}
 
-	if keyDetails["status"] == models.KeyStatusInvalid {
+	if keyDetails["status"] == models.KeyStatusInvalid || keyDetails["status"] == models.KeyStatusCooldown {
 		return nil
 	}
 
@@ -264,7 +267,15 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 		updates := map[string]any{"failure_count": newFailureCount}
 		shouldBlacklist := isFatal || (blacklistThreshold > 0 && newFailureCount >= int64(blacklistThreshold))
 		if shouldBlacklist {
-			updates["status"] = models.KeyStatusInvalid
+			if isFatal {
+				// 致命错误（额度耗尽/限流）：标记为 cooldown 并记录冷却截止时间
+				updates["status"] = models.KeyStatusCooldown
+				if cooldown > 0 {
+					updates["cooldown_until"] = time.Now().Add(cooldown).Unix()
+				}
+			} else {
+				updates["status"] = models.KeyStatusInvalid
+			}
 		}
 
 		if err := tx.Model(&key).Updates(updates).Error; err != nil {
@@ -285,8 +296,11 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 				return fmt.Errorf("failed to LRem key from active list: %w", err)
 			}
 			storeUpdates := map[string]any{"status": models.KeyStatusInvalid}
-			if isFatal && cooldown > 0 {
-				storeUpdates[CooldownUntilField] = time.Now().Add(cooldown).Unix()
+			if isFatal {
+				storeUpdates["status"] = models.KeyStatusCooldown
+				if cooldown > 0 {
+					storeUpdates[CooldownUntilField] = time.Now().Add(cooldown).Unix()
+				}
 			}
 			if err := p.store.HSet(keyHashKey, storeUpdates); err != nil {
 				return fmt.Errorf("failed to update key status to invalid in store: %w", err)
@@ -427,13 +441,13 @@ func (p *KeyProvider) RemoveKeys(groupID uint, keyValues []string) (int64, error
 	return deletedCount, err
 }
 
-// RestoreKeys 恢复组内所有无效的 Key。
+// RestoreKeys 恢复组内所有无效/冷却中的 Key。
 func (p *KeyProvider) RestoreKeys(groupID uint) (int64, error) {
 	var invalidKeys []models.APIKey
 	var restoredCount int64
 
 	err := p.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("group_id = ? AND status = ?", groupID, models.KeyStatusInvalid).Find(&invalidKeys).Error; err != nil {
+		if err := tx.Where("group_id = ? AND status IN ?", groupID, []string{models.KeyStatusInvalid, models.KeyStatusCooldown}).Find(&invalidKeys).Error; err != nil {
 			return err
 		}
 
@@ -442,10 +456,11 @@ func (p *KeyProvider) RestoreKeys(groupID uint) (int64, error) {
 		}
 
 		updates := map[string]any{
-			"status":        models.KeyStatusActive,
-			"failure_count": 0,
+			"status":         models.KeyStatusActive,
+			"failure_count":  0,
+			"cooldown_until": 0,
 		}
-		result := tx.Model(&models.APIKey{}).Where("group_id = ? AND status = ?", groupID, models.KeyStatusInvalid).Updates(updates)
+		result := tx.Model(&models.APIKey{}).Where("group_id = ? AND status IN ?", groupID, []string{models.KeyStatusInvalid, models.KeyStatusCooldown}).Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -454,6 +469,7 @@ func (p *KeyProvider) RestoreKeys(groupID uint) (int64, error) {
 		for _, key := range invalidKeys {
 			key.Status = models.KeyStatusActive
 			key.FailureCount = 0
+			key.CooldownUntil = 0
 			if err := p.addKeyToStore(&key); err != nil {
 				logrus.WithFields(logrus.Fields{"keyID": key.ID, "error": err}).Error("Failed to restore key in store after DB update, rolling back transaction")
 				return err
@@ -487,7 +503,7 @@ func (p *KeyProvider) RestoreMultipleKeys(groupID uint, keyValues []string) (int
 			return nil
 		}
 
-		if err := tx.Where("group_id = ? AND key_hash IN ? AND status = ?", groupID, keyHashes, models.KeyStatusInvalid).Find(&keysToRestore).Error; err != nil {
+		if err := tx.Where("group_id = ? AND key_hash IN ? AND status IN ?", groupID, keyHashes, []string{models.KeyStatusInvalid, models.KeyStatusCooldown}).Find(&keysToRestore).Error; err != nil {
 			return err
 		}
 
@@ -498,8 +514,9 @@ func (p *KeyProvider) RestoreMultipleKeys(groupID uint, keyValues []string) (int
 		keyIDsToRestore := pluckIDs(keysToRestore)
 
 		updates := map[string]any{
-			"status":        models.KeyStatusActive,
-			"failure_count": 0,
+			"status":         models.KeyStatusActive,
+			"failure_count":  0,
+			"cooldown_until": 0,
 		}
 		result := tx.Model(&models.APIKey{}).Where("id IN ?", keyIDsToRestore).Updates(updates)
 		if result.Error != nil {
@@ -510,6 +527,7 @@ func (p *KeyProvider) RestoreMultipleKeys(groupID uint, keyValues []string) (int
 		for _, key := range keysToRestore {
 			key.Status = models.KeyStatusActive
 			key.FailureCount = 0
+			key.CooldownUntil = 0
 			if err := p.addKeyToStore(&key); err != nil {
 				logrus.WithFields(logrus.Fields{"keyID": key.ID, "error": err}).Error("Failed to restore key in store after DB update")
 				return err
@@ -522,9 +540,9 @@ func (p *KeyProvider) RestoreMultipleKeys(groupID uint, keyValues []string) (int
 	return restoredCount, err
 }
 
-// RemoveInvalidKeys 移除组内所有无效的 Key。
+// RemoveInvalidKeys 移除组内所有无效/冷却中的 Key。
 func (p *KeyProvider) RemoveInvalidKeys(groupID uint) (int64, error) {
-	return p.removeKeysByStatus(groupID, models.KeyStatusInvalid)
+	return p.removeKeysByStatus(groupID, models.KeyStatusInvalid, models.KeyStatusCooldown)
 }
 
 // RemoveAllKeys 移除组内所有的 Key。
@@ -694,12 +712,13 @@ func (p *KeyProvider) removeKeyFromStore(keyID, groupID uint) error {
 // apiKeyToMap converts an APIKey model to a map for HSET.
 func (p *KeyProvider) apiKeyToMap(key *models.APIKey) map[string]any {
 	return map[string]any{
-		"id":            fmt.Sprint(key.ID),
-		"key_string":    key.KeyValue,
-		"status":        key.Status,
-		"failure_count": key.FailureCount,
-		"group_id":      key.GroupID,
-		"created_at":    key.CreatedAt.Unix(),
+		"id":             fmt.Sprint(key.ID),
+		"key_string":     key.KeyValue,
+		"status":         key.Status,
+		"failure_count":  key.FailureCount,
+		"group_id":       key.GroupID,
+		"created_at":     key.CreatedAt.Unix(),
+		"cooldown_until": key.CooldownUntil,
 	}
 }
 

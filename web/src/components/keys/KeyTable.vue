@@ -14,6 +14,7 @@ import {
   Pencil,
   RemoveCircleOutline,
   Search,
+  TimeOutline,
 } from "@vicons/ionicons5";
 import {
   NButton,
@@ -48,7 +49,7 @@ const props = defineProps<Props>();
 const keys = ref<KeyRow[]>([]);
 const loading = ref(false);
 const searchText = ref("");
-const statusFilter = ref<"all" | "active" | "invalid">("all");
+const statusFilter = ref<"all" | "active" | "invalid" | "cooldown">("all");
 const currentPage = ref(1);
 const pageSize = ref(12);
 const total = ref(0);
@@ -60,6 +61,7 @@ const confirmInput = ref("");
 const statusOptions = [
   { label: t("common.all"), value: "all" },
   { label: t("keys.valid"), value: "active" },
+  { label: t("keys.cooldown"), value: "cooldown" },
   { label: t("keys.invalid"), value: "invalid" },
 ];
 
@@ -419,11 +421,34 @@ function getStatusClass(status: KeyStatus): string {
   switch (status) {
     case "active":
       return "status-valid";
+    case "cooldown":
+      return "status-cooldown";
     case "invalid":
       return "status-invalid";
     default:
       return "status-unknown";
   }
+}
+
+// 格式化冷却剩余时间
+function getCooldownRemaining(key: KeyRow): string {
+  const until = key.cooldown_until;
+  if (!until || until <= 0) {
+    return "";
+  }
+  const remainingSeconds = Math.floor(until - Date.now() / 1000);
+  if (remainingSeconds <= 0) {
+    return t("keys.cooldownExpired");
+  }
+  const diffHours = Math.floor(remainingSeconds / 3600);
+  const diffMinutes = Math.floor((remainingSeconds % 3600) / 60);
+  if (diffHours > 0) {
+    return t("keys.cooldownRemainingHours", { hours: diffHours, minutes: diffMinutes });
+  }
+  if (diffMinutes > 0) {
+    return t("keys.cooldownRemainingMinutes", { minutes: diffMinutes });
+  }
+  return t("keys.cooldownRemainingSeconds", { seconds: remainingSeconds });
 }
 
 async function copyAllKeys() {
@@ -703,6 +728,12 @@ function resetPage() {
                   </template>
                   {{ t("keys.validShort") }}
                 </n-tag>
+                <n-tag v-else-if="key.status === 'cooldown'" type="warning" :bordered="false" round>
+                  <template #icon>
+                    <n-icon :component="TimeOutline" />
+                  </template>
+                  {{ t("keys.cooldownShort") }}
+                </n-tag>
                 <n-tag v-else :bordered="false" round>
                   <template #icon>
                     <n-icon :component="AlertCircleOutline" />
@@ -753,6 +784,9 @@ function resetPage() {
                 </span>
                 <span class="stat-item">
                   {{ key.last_used_at ? formatRelativeTime(key.last_used_at) : t("keys.unused") }}
+                </span>
+                <span v-if="key.status === 'cooldown'" class="stat-item cooldown-remaining">
+                  {{ getCooldownRemaining(key) }}
                 </span>
               </div>
               <n-button-group class="key-actions">
@@ -1063,6 +1097,17 @@ function resetPage() {
   border-color: var(--invalid-border);
   background: var(--card-bg-solid);
   opacity: 0.85;
+}
+
+.key-card.status-cooldown {
+  border-color: var(--warning-border, #f5a623);
+  background: var(--card-bg-solid);
+  border-width: 1.5px;
+}
+
+.cooldown-remaining {
+  color: #f5a623;
+  font-size: 12px;
 }
 
 .key-card.status-error {
