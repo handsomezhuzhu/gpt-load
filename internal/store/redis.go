@@ -122,6 +122,19 @@ func (s *RedisStore) Rotate(key string) (string, error) {
 	return val, nil
 }
 
+// LFirst returns the head of a list without rotating it.
+// Used by the "fill-first" key selection strategy to keep using the same key.
+func (s *RedisStore) LFirst(key string) (string, error) {
+	val, err := s.client.LIndex(context.Background(), s.prefixKey(key), 0).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return val, nil
+}
+
 // LLen returns the length of a list.
 func (s *RedisStore) LLen(key string) (int64, error) {
 	return s.client.LLen(context.Background(), s.prefixKey(key)).Result()

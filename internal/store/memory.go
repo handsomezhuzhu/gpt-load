@@ -302,6 +302,29 @@ func (s *MemoryStore) Rotate(key string) (string, error) {
 	return item, nil
 }
 
+// LFirst returns the head of a list without rotating it.
+// Used by the "fill-first" key selection strategy to keep using the same key.
+func (s *MemoryStore) LFirst(key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rawList, exists := s.data[key]
+	if !exists {
+		return "", ErrNotFound
+	}
+
+	list, ok := rawList.([]string)
+	if !ok {
+		return "", fmt.Errorf("type mismatch: key '%s' holds a different data type", key)
+	}
+
+	if len(list) == 0 {
+		return "", ErrNotFound
+	}
+
+	return list[0], nil
+}
+
 // LLen returns the length of a list.
 func (s *MemoryStore) LLen(key string) (int64, error) {
 	s.mu.RLock()

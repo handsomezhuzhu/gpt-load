@@ -76,6 +76,7 @@ interface GroupFormData {
   model_redirect_strict: boolean;
   config: Record<string, number | string | boolean>;
   configItems: ConfigItem[];
+  key_selection_strategy: string;
   header_rules: HeaderRuleItem[];
   proxy_keys: string;
   group_type?: string;
@@ -101,6 +102,7 @@ const formData = reactive<GroupFormData>({
   model_redirect_strict: false,
   config: {},
   configItems: [] as ConfigItem[],
+  key_selection_strategy: "round_robin",
   header_rules: [] as HeaderRuleItem[],
   proxy_keys: "",
   group_type: "standard",
@@ -302,6 +304,7 @@ function resetForm() {
     model_redirect_strict: false,
     config: {},
     configItems: [],
+    key_selection_strategy: "round_robin",
     header_rules: [],
     proxy_keys: "",
     group_type: "standard",
@@ -322,12 +325,14 @@ function loadGroupData() {
     return;
   }
 
-  const configItems = Object.entries(props.group.config || {}).map(([key, value]) => {
-    return {
-      key,
-      value,
-    };
-  });
+  const configItems = Object.entries(props.group.config || {})
+    .filter(([key]) => key !== "key_selection_strategy")
+    .map(([key, value]) => {
+      return {
+        key,
+        value,
+      };
+    });
   Object.assign(formData, {
     name: props.group.name || "",
     display_name: props.group.display_name || "",
@@ -344,6 +349,8 @@ function loadGroupData() {
     model_redirect_strict: props.group.model_redirect_strict || false,
     config: {},
     configItems,
+    key_selection_strategy:
+      (props.group.config?.key_selection_strategy as string | undefined) || "round_robin",
     header_rules: (props.group.header_rules || []).map((rule: HeaderRuleItem) => ({
       key: rule.key || "",
       value: rule.value || "",
@@ -383,7 +390,7 @@ function removeUpstream(index: number) {
 
 async function fetchGroupConfigOptions() {
   const options = await keysApi.getGroupConfigOptions();
-  configOptions.value = options || [];
+  configOptions.value = (options || []).filter(opt => opt.key !== "key_selection_strategy");
   configOptionsFetched.value = true;
 }
 
@@ -516,6 +523,7 @@ async function handleSubmit() {
         }
       }
     });
+    config.key_selection_strategy = formData.key_selection_strategy;
 
     // 构建提交数据
     const submitData = {
@@ -851,6 +859,35 @@ async function handleSubmit() {
           <n-collapse>
             <n-collapse-item name="advanced">
               <template #header>{{ t("keys.advancedConfig") }}</template>
+              <div class="config-section">
+                <n-form-item path="key_selection_strategy">
+                  <template #label>
+                    <div class="form-label-with-tooltip">
+                      {{ t("keys.keySelectionStrategy") }}
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                        </template>
+                        {{ t("keys.keySelectionStrategyTooltip") }}
+                      </n-tooltip>
+                    </div>
+                  </template>
+                  <n-select
+                    v-model:value="formData.key_selection_strategy"
+                    :options="[
+                      {
+                        label: t('keys.keySelectionStrategyRoundRobin'),
+                        value: 'round_robin',
+                      },
+                      {
+                        label: t('keys.keySelectionStrategyFillFirst'),
+                        value: 'fill_first',
+                      },
+                    ]"
+                  />
+                </n-form-item>
+              </div>
+
               <div class="config-section">
                 <h5 class="config-title-with-tooltip">
                   {{ t("keys.groupConfig") }}

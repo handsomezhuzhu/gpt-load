@@ -34,12 +34,23 @@ func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemS
 	}
 }
 
-// SelectKey 为指定的分组原子性地选择并轮换一个可用的 APIKey。
-func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
+// SelectKey 为指定的分组选择并轮换一个可用的 APIKey。
+// strategy 决定密钥选择方式：
+//   - KeySelectionStrategyFillFirst: 填充策略，持续取列表头部的密钥（不轮换），
+//     直到该密钥失败达到黑名单阈值被移除后，才自然切换到下一个密钥。
+//   - 其他值（默认）: 轮询策略，每次请求轮换到下一个密钥。
+func (p *KeyProvider) SelectKey(groupID uint, strategy string) (*models.APIKey, error) {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 
-	// 1. Atomically rotate the key ID from the list
-	keyIDStr, err := p.store.Rotate(activeKeysListKey)
+	var keyIDStr string
+	var err error
+	if strategy == models.KeySelectionStrategyFillFirst {
+		// Fill-first: peek the head of the list without rotating.
+		keyIDStr, err = p.store.LFirst(activeKeysListKey)
+	} else {
+		// Round-robin: atomically rotate the key ID from the list
+		keyIDStr, err = p.store.Rotate(activeKeysListKey)
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, app_errors.ErrNoActiveKeys

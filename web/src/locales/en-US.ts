@@ -330,6 +330,11 @@ export default {
     weightTooltip:
       "Load balancing weight configuration. Weight determines traffic distribution ratio - higher values receive more traffic. Weight 0 disables the upstream (no requests). Example: Weight 2:1 means the first receives ~67% of traffic",
     addUpstream: "Add Upstream",
+    keySelectionStrategy: "Key Selection Strategy",
+    keySelectionStrategyTooltip:
+      "Round Robin: rotate to the next key on every request, distributing requests evenly across all keys. Fill First: keep using the same key (the head of the list) until it is removed after reaching the blacklist threshold due to failures, then automatically switch to the next key. Best for subscription/quota-based keys to maximize each key's utilization",
+    keySelectionStrategyRoundRobin: "Round Robin",
+    keySelectionStrategyFillFirst: "Fill First",
     groupConfig: "Group Configuration",
     groupConfigTooltip:
       "Group-specific configuration parameters like timeout, retry count, etc. These settings override global defaults",

@@ -39,6 +39,13 @@ func validateStringSettingValue(key, val string) error {
 			return fmt.Errorf("invalid value for %s (%q): %w", key, val, err)
 		}
 	}
+	if key == "key_selection_strategy" {
+		switch val {
+		case models.KeySelectionStrategyRoundRobin, models.KeySelectionStrategyFillFirst:
+		default:
+			return fmt.Errorf("invalid value for %s (%q): must be %q or %q", key, val, models.KeySelectionStrategyRoundRobin, models.KeySelectionStrategyFillFirst)
+		}
+	}
 	return nil
 }
 

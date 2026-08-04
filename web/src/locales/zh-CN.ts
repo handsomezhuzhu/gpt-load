@@ -321,6 +321,11 @@ export default {
     weightTooltip:
       "负载均衡权重配置。权重决定流量分配比例，数值越大获得的流量越多。权重为0时禁用该上游（不接收任何请求）。示例：权重2:1表示前者获得约67%的流量",
     addUpstream: "添加上游地址",
+    keySelectionStrategy: "密钥选择策略",
+    keySelectionStrategyTooltip:
+      "轮询：每次请求轮换到下一个密钥，请求均匀分散在所有密钥上。填充：持续使用同一个密钥（列表头部），直到该密钥因失败达到黑名单阈值被移除后，才自动切换到下一个密钥，适合订阅制/额度型密钥，可最大化单个密钥的利用",
+    keySelectionStrategyRoundRobin: "轮询（Round Robin）",
+    keySelectionStrategyFillFirst: "填充（Fill First）",
     groupConfig: "分组配置",
     groupConfigTooltip:
       "针对此分组的专用配置参数，如超时时间、重试次数等。这些配置会覆盖全局默认设置",

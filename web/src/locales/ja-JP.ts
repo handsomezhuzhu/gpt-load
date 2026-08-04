@@ -329,6 +329,11 @@ export default {
     weightTooltip:
       "ロードバランシング重み設定。重みはトラフィック分配比率を決定し、値が高いほど多くのトラフィックを受信します。重み0はアップストリームを無効化（リクエストなし）。例：重み2:1は前者が約67%のトラフィックを受信",
     addUpstream: "アップストリーム追加",
+    keySelectionStrategy: "キー選択戦略",
+    keySelectionStrategyTooltip:
+      "ラウンドロビン：リクエストごとに次のキーへローテーションし、全キーに均等に分散します。フィルファースト：リスト先頭の同じキーを使い続け、ブラックリスト閾値に達して除去されるまで維持し、その後自動的に次のキーへ切り替えます。サブスクリプション/クォータ型キーに最適で、各キーの利用を最大化します",
+    keySelectionStrategyRoundRobin: "ラウンドロビン",
+    keySelectionStrategyFillFirst: "フィルファースト",
     groupConfig: "グループ設定",
     groupConfigTooltip:
       "タイムアウト、リトライ回数などのグループ固有の設定パラメーター。これらの設定はグローバルデフォルトを上書きします",

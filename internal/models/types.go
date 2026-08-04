@@ -14,6 +14,12 @@ const (
 	KeyStatusInvalid = "invalid"
 )
 
+// Key选择策略
+const (
+	KeySelectionStrategyRoundRobin = "round_robin" // 轮询：每次请求轮换到下一个密钥
+	KeySelectionStrategyFillFirst  = "fill_first"  // 填充：持续使用第一个可用密钥，直到其被拉黑后再切换
+)
+
 // SystemSetting 对应 system_settings 表
 type SystemSetting struct {
 	ID           uint      `gorm:"primaryKey;autoIncrement" json:"id"`
@@ -36,6 +42,7 @@ type GroupConfig struct {
 	MaxRetries                   *int    `json:"max_retries,omitempty"`
 	BlacklistThreshold           *int    `json:"blacklist_threshold,omitempty"`
 	FailoverStatusCodes          *string `json:"failover_status_codes,omitempty"`
+	KeySelectionStrategy         *string `json:"key_selection_strategy,omitempty"`
 	KeyValidationIntervalMinutes *int    `json:"key_validation_interval_minutes,omitempty"`
 	KeyValidationConcurrency     *int    `json:"key_validation_concurrency,omitempty"`
 	KeyValidationTimeoutSeconds  *int    `json:"key_validation_timeout_seconds,omitempty"`
