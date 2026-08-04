@@ -200,8 +200,19 @@ async function loadParentAggregateGroups() {
 }
 
 function getConfigDisplayName(key: string): string {
+  if (key === "key_selection_strategy") {
+    return t("keys.keySelectionStrategy");
+  }
   const option = configOptions.value.find(opt => opt.key === key);
   return option?.name || key;
+}
+
+function getConfigDisplayValue(key: string, value: unknown): string {
+  if (key === "key_selection_strategy") {
+    if (value === "fill_first") return t("keys.keySelectionStrategyFillFirst");
+    if (value === "round_robin") return t("keys.keySelectionStrategyRoundRobin");
+  }
+  return String(value ?? "-");
 }
 
 function getConfigDescription(key: string): string {
@@ -702,7 +713,7 @@ function resetPage() {
                         </div>
                       </n-tooltip>
                     </template>
-                    {{ value || "-" }}
+                    {{ getConfigDisplayValue(key, value) }}
                   </n-form-item>
                   <n-form-item
                     v-if="group?.header_rules && group.header_rules.length > 0"
