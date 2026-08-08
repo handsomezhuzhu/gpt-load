@@ -169,6 +169,8 @@ var MessagesZhCN = map[string]string{
 	"config.failover_status_codes_desc":      "触发故障转移（重试）的上游 HTTP 状态码完整列表，支持逗号分隔和范围，例如：400-403,405-999,250-260。分组可单独覆盖此值。",
 	"config.key_selection_strategy":          "密钥选择策略",
 	"config.key_selection_strategy_desc":     "密钥池的选择策略：round_robin（轮询，每次请求轮换到下一个密钥）或 fill_first（填充，优先使用同一密钥直到其失败或达到并发上限）。分组可单独覆盖此值。",
+	"config.key_concurrency_limit":           "默认并发上限",
+	"config.key_concurrency_limit_desc":      "密钥的默认并发上限（>0）：仅对未单独设置并发上限的密钥生效，达到上限后智能路由到其他密钥；0 表示不设置（每个密钥使用自己的配置/智能策略）。分组可单独覆盖此值。",
 	"config.key_validation_interval":         "密钥验证间隔（分钟）",
 	"config.key_validation_interval_desc":    "后台验证密钥的默认间隔（分钟）。",
 	"config.key_validation_concurrency":      "密钥验证并发数",

@@ -446,6 +446,8 @@ export default {
     concurrencyLimit: "同時実行上限",
     concurrencyLimitHint:
       "0 = スマート戦略（上限なし。429 受信時に他のキーへ自動切替）；>0 = ハード上限。到達すると他のキーへルーティング",
+    concurrencyLimitGroupHint:
+      "0 = 未設定（各キーが自身の設定/スマート戦略を使用）；>0 = グループ内で独自の上限を設定していないキーに一括適用。到達すると他のキーへルーティング",
     concurrencyLimitUpdated: "同時実行上限を更新しました",
     editConcurrencyLimit: "同時実行上限を編集",
     concurrencySmart: "スマート",

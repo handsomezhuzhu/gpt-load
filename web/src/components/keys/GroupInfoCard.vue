@@ -203,14 +203,28 @@ function getConfigDisplayName(key: string): string {
   if (key === "key_selection_strategy") {
     return t("keys.keySelectionStrategy");
   }
+  if (key === "key_concurrency_limit") {
+    return t("keys.concurrencyLimit");
+  }
   const option = configOptions.value.find(opt => opt.key === key);
   return option?.name || key;
 }
 
 function getConfigDisplayValue(key: string, value: unknown): string {
   if (key === "key_selection_strategy") {
-    if (value === "fill_first") return t("keys.keySelectionStrategyFillFirst");
-    if (value === "round_robin") return t("keys.keySelectionStrategyRoundRobin");
+    if (value === "fill_first") {
+      return t("keys.keySelectionStrategyFillFirst");
+    }
+    if (value === "round_robin") {
+      return t("keys.keySelectionStrategyRoundRobin");
+    }
+  }
+  if (key === "key_concurrency_limit") {
+    const num = Number(value);
+    if (num <= 0) {
+      return t("keys.concurrencySmart");
+    }
+    return String(num);
   }
   return String(value ?? "-");
 }

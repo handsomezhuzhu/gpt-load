@@ -55,11 +55,13 @@ func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemS
 //     直到该密钥失败达到黑名单阈值被移除后，才自然切换到下一个密钥。
 //   - 其他值（默认）: 轮询策略，每次请求轮换到下一个密钥。
 //
-// 并发感知：concurrency_limit > 0 的 key 在 in-flight 达到上限时会被跳过，
-// 智能路由到下一个有空位的 key（fill_first 从头扫描，round_robin 轮换跳过）。
-// 组内所有 key 均达到上限时返回 ErrAllKeysBusy（HTTP 429）。
+// 并发感知：密钥的有效并发上限 = key 自己的 concurrency_limit（>0 优先），
+// 否则使用分组默认 groupDefaultLimit（>0），否则为 0（智能策略，依赖 429 自动切换）。
+// in-flight 达到上限的 key 会被跳过，智能路由到下一个有空位的 key
+// （fill_first 从头扫描，round_robin 轮换跳过）。组内所有 key 均达到上限时
+// 返回 ErrAllKeysBusy（HTTP 429）。
 // 注意：返回的 key 已占用一个并发槽位，调用方必须在请求结束（含重试/失败）后调用 ReleaseKey 释放。
-func (p *KeyProvider) SelectKey(groupID uint, strategy string) (*models.APIKey, error) {
+func (p *KeyProvider) SelectKey(groupID uint, strategy string, groupDefaultLimit int64) (*models.APIKey, error) {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 
 	length, err := p.store.LLen(activeKeysListKey)
@@ -102,8 +104,13 @@ func (p *KeyProvider) SelectKey(groupID uint, strategy string) (*models.APIKey, 
 			continue
 		}
 
-		// 3. 并发感知：limit > 0 且 in-flight 已满时跳过该 key，路由到下一个。
-		limit, _ := strconv.ParseInt(keyDetails["concurrency_limit"], 10, 64)
+		// 3. 并发感知：key 的有效上限 = 自身配置（>0 优先），否则用分组默认，
+		//    否则为 0（智能策略）。in-flight 已满时跳过该 key，路由到下一个。
+		keyLimit, _ := strconv.ParseInt(keyDetails["concurrency_limit"], 10, 64)
+		limit := keyLimit
+		if limit <= 0 {
+			limit = groupDefaultLimit
+		}
 		if limit > 0 && !p.acquireSlot(uint(keyID), limit) {
 			logrus.WithFields(logrus.Fields{"keyID": keyID, "limit": limit}).Debug("Key is at concurrency limit, trying next key")
 			continue

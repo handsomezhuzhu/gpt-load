@@ -62,7 +62,7 @@ func TestSelectKeyFillFirstSkipsSaturatedKeys(t *testing.T) {
 	seedGroup(t, p, groupID, map[uint]int64{1: 1, 2: 1}, 1, 2)
 
 	// 占满 key 1 的并发槽位
-	key1, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+	key1, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 	if err != nil {
 		t.Fatalf("SelectKey failed: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestSelectKeyFillFirstSkipsSaturatedKeys(t *testing.T) {
 	}
 
 	// key 1 已饱和，fill-first 应溢出到 key 2
-	key2, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+	key2, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 	if err != nil {
 		t.Fatalf("SelectKey failed: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestSelectKeyFillFirstSkipsSaturatedKeys(t *testing.T) {
 
 	// 释放 key 1 的槽位后，fill-first 应重新回到队头 key 1
 	p.ReleaseKey(1)
-	keyAgain, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+	keyAgain, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 	if err != nil {
 		t.Fatalf("SelectKey failed: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestSelectKeyRoundRobinSkipsSaturatedKeys(t *testing.T) {
 	seedGroup(t, p, groupID, map[uint]int64{1: 0, 2: 1}, 1, 2)
 
 	// 占满 key 2 的槽位（先选中它并占用）
-	first, err := p.SelectKey(groupID, models.KeySelectionStrategyRoundRobin)
+	first, err := p.SelectKey(groupID, models.KeySelectionStrategyRoundRobin, 0)
 	if err != nil {
 		t.Fatalf("SelectKey failed: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestSelectKeyRoundRobinSkipsSaturatedKeys(t *testing.T) {
 
 	// 无论怎么轮换，饱和的 key 2 都不应被选中
 	for i := 0; i < 5; i++ {
-		k, err := p.SelectKey(groupID, models.KeySelectionStrategyRoundRobin)
+		k, err := p.SelectKey(groupID, models.KeySelectionStrategyRoundRobin, 0)
 		if err != nil {
 			t.Fatalf("SelectKey failed: %v", err)
 		}
@@ -126,24 +126,24 @@ func TestSelectKeyAllKeysBusy(t *testing.T) {
 	seedGroup(t, p, groupID, map[uint]int64{1: 1, 2: 1}, 1, 2)
 
 	// 占满两个 key
-	k1, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+	k1, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 	if err != nil {
 		t.Fatalf("SelectKey failed: %v", err)
 	}
-	k2, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+	k2, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 	if err != nil {
 		t.Fatalf("SelectKey failed: %v", err)
 	}
 
 	// 全部饱和 → ErrAllKeysBusy
-	_, err = p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+	_, err = p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 	if !errors.Is(err, app_errors.ErrAllKeysBusy) {
 		t.Fatalf("SelectKey = %v, want ErrAllKeysBusy", err)
 	}
 
 	// 释放一个槽位后恢复可选
 	p.ReleaseKey(k1.ID)
-	recovered, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+	recovered, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 	if err != nil {
 		t.Fatalf("SelectKey after release failed: %v", err)
 	}
@@ -161,14 +161,14 @@ func TestSelectKeySmartStrategyKeyAlwaysAvailable(t *testing.T) {
 	seedGroup(t, p, groupID, map[uint]int64{1: 0, 2: 1}, 1, 2)
 
 	// 占用 key 2 的槽位
-	_, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+	_, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 	if err != nil {
 		t.Fatalf("SelectKey failed: %v", err)
 	}
 
 	// key 1 无限流，只要它在列表中，就永远不会出现 all-busy
 	for i := 0; i < 3; i++ {
-		k, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+		k, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 		if err != nil {
 			t.Fatalf("SelectKey failed: %v", err)
 		}
@@ -205,6 +205,63 @@ func TestReleaseKeyFloorAtZero(t *testing.T) {
 	}
 }
 
+func TestSelectKeyGroupDefaultLimit(t *testing.T) {
+	p := newTestProvider(t)
+	const groupID = 1
+	// key 1 未单独设置（0），key 2 单独设置了 limit=1
+	seedGroup(t, p, groupID, map[uint]int64{1: 0, 2: 1}, 1, 2)
+
+	// 组级默认 limit=2：key 1 使用组级值 2，key 2 用自己的 1
+	k1, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 2)
+	if err != nil {
+		t.Fatalf("SelectKey failed: %v", err)
+	}
+	if k1.ID != 1 {
+		t.Fatalf("first selection = key %d, want key 1", k1.ID)
+	}
+
+	// key 1 未满（1/2），fill-first 继续用 key 1
+	k1Again, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 2)
+	if err != nil {
+		t.Fatalf("SelectKey failed: %v", err)
+	}
+	if k1Again.ID != 1 {
+		t.Fatalf("second selection = key %d, want key 1 (still under group limit)", k1Again.ID)
+	}
+
+	// key 1 现在 2/2 满，key 2 用自身 limit=1，占满后全部饱和 → ErrAllKeysBusy
+	k2, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 2)
+	if err != nil {
+		t.Fatalf("SelectKey failed: %v", err)
+	}
+	if k2.ID != 2 {
+		t.Fatalf("third selection = key %d, want key 2", k2.ID)
+	}
+	_, err = p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 2)
+	if !errors.Is(err, app_errors.ErrAllKeysBusy) {
+		t.Fatalf("SelectKey = %v, want ErrAllKeysBusy", err)
+	}
+
+	p.ReleaseKey(1)
+	p.ReleaseKey(1)
+	p.ReleaseKey(2)
+}
+
+func TestSelectKeyGroupDefaultLimitZeroMeansUnset(t *testing.T) {
+	p := newTestProvider(t)
+	const groupID = 1
+	// key 1 未单独设置，组级默认 0 = 不设置 → 智能策略，永不饱和
+	seedGroup(t, p, groupID, map[uint]int64{1: 0}, 1)
+
+	for i := 0; i < 5; i++ {
+		k, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
+		if err != nil {
+			t.Fatalf("SelectKey failed: %v", err)
+		}
+		p.ReleaseKey(k.ID)
+	}
+}
+
 func TestSelectKeyConcurrentAcquisition(t *testing.T) {
 	p := newTestProvider(t)
 	const groupID = 1
@@ -219,7 +276,7 @@ func TestSelectKeyConcurrentAcquisition(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			k, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst)
+			k, err := p.SelectKey(groupID, models.KeySelectionStrategyFillFirst, 0)
 			if err == nil {
 				successes <- int64(k.ID)
 			}

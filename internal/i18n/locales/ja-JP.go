@@ -169,6 +169,8 @@ var MessagesJaJP = map[string]string{
 	"config.failover_status_codes_desc":      "フェイルオーバー（リトライ）をトリガーする上流 HTTP ステータスコードの完全なリスト。カンマ区切りと範囲指定に対応（例：400-403,405-999,250-260）。グループごとに個別上書き可能。",
 	"config.key_selection_strategy":          "キー選択戦略",
 	"config.key_selection_strategy_desc":     "キープールの選択戦略：round_robin（ラウンドロビン、リクエストごとに次のキーへ）または fill_first（フィルファースト、失敗するか同時実行上限に達するまで同じキーを使い続ける）。グループごとに個別上書き可能。",
+	"config.key_concurrency_limit":           "デフォルト同時実行上限",
+	"config.key_concurrency_limit_desc":      "キーのデフォルト同時実行上限（>0）：独自の上限を設定していないキーにのみ適用。上限に達すると他のキーへスマートにルーティング。0 は未設定（各キーが自身の設定/スマート戦略を使用）。グループごとに個別上書き可能。",
 	"config.key_validation_interval":         "キー検証間隔（分）",
 	"config.key_validation_interval_desc":    "バックグラウンドキー検証のデフォルト間隔（分）。",
 	"config.key_validation_concurrency":      "キー検証並行数",

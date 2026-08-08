@@ -77,6 +77,7 @@ interface GroupFormData {
   config: Record<string, number | string | boolean>;
   configItems: ConfigItem[];
   key_selection_strategy: string;
+  key_concurrency_limit: number;
   header_rules: HeaderRuleItem[];
   proxy_keys: string;
   group_type?: string;
@@ -103,6 +104,7 @@ const formData = reactive<GroupFormData>({
   config: {},
   configItems: [] as ConfigItem[],
   key_selection_strategy: "round_robin",
+  key_concurrency_limit: 0,
   header_rules: [] as HeaderRuleItem[],
   proxy_keys: "",
   group_type: "standard",
@@ -305,6 +307,7 @@ function resetForm() {
     config: {},
     configItems: [],
     key_selection_strategy: "round_robin",
+    key_concurrency_limit: 0,
     header_rules: [],
     proxy_keys: "",
     group_type: "standard",
@@ -326,7 +329,7 @@ function loadGroupData() {
   }
 
   const configItems = Object.entries(props.group.config || {})
-    .filter(([key]) => key !== "key_selection_strategy")
+    .filter(([key]) => key !== "key_selection_strategy" && key !== "key_concurrency_limit")
     .map(([key, value]) => {
       return {
         key,
@@ -351,6 +354,8 @@ function loadGroupData() {
     configItems,
     key_selection_strategy:
       (props.group.config?.key_selection_strategy as string | undefined) || "round_robin",
+    key_concurrency_limit:
+      (props.group.config?.key_concurrency_limit as number | undefined) || 0,
     header_rules: (props.group.header_rules || []).map((rule: HeaderRuleItem) => ({
       key: rule.key || "",
       value: rule.value || "",
@@ -390,7 +395,9 @@ function removeUpstream(index: number) {
 
 async function fetchGroupConfigOptions() {
   const options = await keysApi.getGroupConfigOptions();
-  configOptions.value = (options || []).filter(opt => opt.key !== "key_selection_strategy");
+  configOptions.value = (options || []).filter(
+    opt => opt.key !== "key_selection_strategy" && opt.key !== "key_concurrency_limit"
+  );
   configOptionsFetched.value = true;
 }
 
@@ -524,6 +531,7 @@ async function handleSubmit() {
       }
     });
     config.key_selection_strategy = formData.key_selection_strategy;
+    config.key_concurrency_limit = formData.key_concurrency_limit;
 
     // 构建提交数据
     const submitData = {
@@ -884,6 +892,26 @@ async function handleSubmit() {
                         value: 'fill_first',
                       },
                     ]"
+                  />
+                </n-form-item>
+
+                <n-form-item path="key_concurrency_limit">
+                  <template #label>
+                    <div class="form-label-with-tooltip">
+                      {{ t("keys.concurrencyLimit") }}
+                      <n-tooltip trigger="hover" placement="top">
+                        <template #trigger>
+                          <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                        </template>
+                        {{ t("keys.concurrencyLimitGroupHint") }}
+                      </n-tooltip>
+                    </div>
+                  </template>
+                  <n-input-number
+                    v-model:value="formData.key_concurrency_limit"
+                    :min="0"
+                    :step="1"
+                    style="width: 100%"
                   />
                 </n-form-item>
               </div>

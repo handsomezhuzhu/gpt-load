@@ -46,6 +46,9 @@ type GroupConfig struct {
 	BlacklistThreshold           *int    `json:"blacklist_threshold,omitempty"`
 	FailoverStatusCodes          *string `json:"failover_status_codes,omitempty"`
 	KeySelectionStrategy         *string `json:"key_selection_strategy,omitempty"`
+	// KeyConcurrencyLimit 为组内密钥的默认并发上限（>0），仅对未单独设置并发上限的
+	// 密钥生效（key 自己的 concurrency_limit 优先），0 表示不设置。
+	KeyConcurrencyLimit          *int    `json:"key_concurrency_limit,omitempty"`
 	KeyValidationIntervalMinutes *int    `json:"key_validation_interval_minutes,omitempty"`
 	KeyValidationConcurrency     *int    `json:"key_validation_concurrency,omitempty"`
 	KeyValidationTimeoutSeconds  *int    `json:"key_validation_timeout_seconds,omitempty"`

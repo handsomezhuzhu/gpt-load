@@ -446,6 +446,8 @@ export default {
     concurrencyLimit: "Concurrency limit",
     concurrencyLimitHint:
       "0 = Smart strategy (no hard cap; automatically switches to another key on 429); >0 = hard cap, routes to other keys when reached",
+    concurrencyLimitGroupHint:
+      "0 = Unset (each key uses its own configuration/smart strategy); >0 = applied to all keys in the group without their own limit, routes to other keys when reached",
     concurrencyLimitUpdated: "Concurrency limit updated",
     editConcurrencyLimit: "Edit concurrency limit",
     concurrencySmart: "Smart",

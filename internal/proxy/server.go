@@ -126,7 +126,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 ) {
 	cfg := group.EffectiveConfig
 
-	apiKey, err := ps.keyProvider.SelectKey(group.ID, group.EffectiveConfig.KeySelectionStrategy)
+	apiKey, err := ps.keyProvider.SelectKey(group.ID, group.EffectiveConfig.KeySelectionStrategy, int64(group.EffectiveConfig.KeyConcurrencyLimit))
 	if err != nil {
 		// 所有 key 均达到并发上限：返回 429 + Retry-After，由客户端重试
 		// （与 CLIProxyAPI 的 credential_concurrency_exceeded 语义一致）。

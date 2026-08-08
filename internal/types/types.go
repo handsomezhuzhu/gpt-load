@@ -39,6 +39,9 @@ type SystemSettings struct {
 	BlacklistThreshold           int    `json:"blacklist_threshold" default:"3" name:"config.blacklist_threshold" category:"config.category.key" desc:"config.blacklist_threshold_desc" validate:"required,min=0"`
 	FailoverStatusCodes          string `json:"failover_status_codes" default:"400-403,405-999" name:"config.failover_status_codes" category:"config.category.key" desc:"config.failover_status_codes_desc"`
 	KeySelectionStrategy         string `json:"key_selection_strategy" default:"round_robin" name:"config.key_selection_strategy" category:"config.category.key" desc:"config.key_selection_strategy_desc" validate:"oneof=round_robin fill_first"`
+	// KeyConcurrencyLimit 为密钥的默认并发上限（>0），仅对未单独设置并发上限的密钥生效，
+	// 0 表示不设置（每个 key 使用自己的配置/智能策略）。分组可单独覆盖此值。
+	KeyConcurrencyLimit          int    `json:"key_concurrency_limit" default:"0" name:"config.key_concurrency_limit" category:"config.category.key" desc:"config.key_concurrency_limit_desc" validate:"required,min=0"`
 	KeyValidationIntervalMinutes int    `json:"key_validation_interval_minutes" default:"60" name:"config.key_validation_interval" category:"config.category.key" desc:"config.key_validation_interval_desc" validate:"required,min=1"`
 	KeyValidationConcurrency     int    `json:"key_validation_concurrency" default:"10" name:"config.key_validation_concurrency" category:"config.category.key" desc:"config.key_validation_concurrency_desc" validate:"required,min=1"`
 	KeyValidationTimeoutSeconds  int    `json:"key_validation_timeout_seconds" default:"20" name:"config.key_validation_timeout" category:"config.category.key" desc:"config.key_validation_timeout_desc" validate:"required,min=1"`
