@@ -12,16 +12,23 @@ import {
   NIcon,
   NInput,
   NInputNumber,
+  NSelect,
   NSpace,
   NSwitch,
   NTooltip,
   useMessage,
   type FormItemRule,
 } from "naive-ui";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
+
+// 密钥选择策略下拉选项（本地化）
+const keySelectionStrategyOptions = computed(() => [
+  { label: t("keys.keySelectionStrategyRoundRobin"), value: "round_robin" },
+  { label: t("keys.keySelectionStrategyFillFirst"), value: "fill_first" },
+]);
 
 const settingList = ref<SettingCategory[]>([]);
 const formRef = ref();
@@ -149,6 +156,13 @@ function generateValidationRules(item: Setting): FormItemRule[] {
                   v-else-if="item.type === 'bool'"
                   v-model:value="form[item.key] as boolean"
                   size="small"
+                />
+                <n-select
+                  v-else-if="item.key === 'key_selection_strategy'"
+                  v-model:value="form[item.key] as string"
+                  :options="keySelectionStrategyOptions"
+                  size="small"
+                  style="width: 100%"
                 />
                 <proxy-keys-input
                   v-else-if="item.key === 'proxy_keys'"

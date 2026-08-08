@@ -167,6 +167,8 @@ var MessagesEnUS = map[string]string{
 	"config.blacklist_threshold_desc":        "After how many cumulative failures does a Key enter the blacklist; 0 means do not blacklist.",
 	"config.failover_status_codes":           "Failover Status Codes",
 	"config.failover_status_codes_desc":      "Complete list of upstream HTTP status codes that trigger failover (retry). Supports comma-separated values and ranges, e.g.: 400-403,405-999,250-260. Groups can override this value individually.",
+	"config.key_selection_strategy":          "Key Selection Strategy",
+	"config.key_selection_strategy_desc":     "Strategy for selecting keys from the pool: round_robin (rotate to the next key on each request) or fill_first (keep using the same key until it fails or reaches its concurrency limit). Groups can override this value individually.",
 	"config.key_validation_interval":         "Key Validation Interval (minutes)",
 	"config.key_validation_interval_desc":    "Default interval (minutes) for background key validation.",
 	"config.key_validation_concurrency":      "Key Validation Concurrency",
