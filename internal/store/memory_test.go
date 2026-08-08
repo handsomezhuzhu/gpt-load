@@ -74,3 +74,46 @@ func TestMemoryStoreRotateAfterLFirst(t *testing.T) {
 		t.Fatalf("LFirst after rotate = %q, want %q", first, "c")
 	}
 }
+
+func TestMemoryStoreLIndex(t *testing.T) {
+	s := NewMemoryStore()
+
+	key := "test:lindex"
+	if err := s.LPush(key, "a", "b", "c"); err != nil {
+		t.Fatalf("LPush failed: %v", err)
+	}
+
+	for index, want := range []string{"a", "b", "c"} {
+		got, err := s.LIndex(key, int64(index))
+		if err != nil {
+			t.Fatalf("LIndex(%d) failed: %v", index, err)
+		}
+		if got != want {
+			t.Fatalf("LIndex(%d) = %q, want %q", index, got, want)
+		}
+	}
+
+	// Negative index counts from the tail
+	if got, err := s.LIndex(key, -1); err != nil || got != "c" {
+		t.Fatalf("LIndex(-1) = %q, %v; want %q", got, err, "c")
+	}
+
+	// Out-of-range indexes return ErrNotFound
+	if _, err := s.LIndex(key, 3); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("LIndex(3) = %v, want ErrNotFound", err)
+	}
+	if _, err := s.LIndex(key, -4); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("LIndex(-4) = %v, want ErrNotFound", err)
+	}
+
+	// Missing/empty lists return ErrNotFound
+	if _, err := s.LIndex("missing:list", 0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("LIndex on missing key = %v, want ErrNotFound", err)
+	}
+	if err := s.LPush("empty:list"); err != nil {
+		t.Fatalf("LPush failed: %v", err)
+	}
+	if _, err := s.LIndex("empty:list", 0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("LIndex on empty list = %v, want ErrNotFound", err)
+	}
+}

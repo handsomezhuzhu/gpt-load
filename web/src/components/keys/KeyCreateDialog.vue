@@ -27,6 +27,7 @@ const loading = ref(false);
 const keysText = ref("");
 const inputMode = ref<"text" | "file">("text");
 const fileList = ref<UploadFileInfo[]>([]);
+const concurrencyLimit = ref<number>(0);
 
 // 监听弹窗显示状态
 watch(
@@ -43,6 +44,7 @@ function resetForm() {
   keysText.value = "";
   inputMode.value = "text";
   fileList.value = [];
+  concurrencyLimit.value = 0;
 }
 
 // 关闭弹窗
@@ -95,10 +97,10 @@ async function handleSubmit() {
     loading.value = true;
 
     if (inputMode.value === "text") {
-      await keysApi.addKeysAsync(props.groupId, keysText.value);
+      await keysApi.addKeysAsync(props.groupId, keysText.value, undefined, concurrencyLimit.value);
     } else {
       const file = fileList.value[0].file as File;
-      await keysApi.addKeysAsync(props.groupId, undefined, file);
+      await keysApi.addKeysAsync(props.groupId, undefined, file, concurrencyLimit.value);
     }
 
     resetForm();
@@ -164,6 +166,18 @@ function isSubmitDisabled() {
           <div class="upload-hint">{{ t("keys.onlyTxtFileSupported") }}</div>
         </div>
       </n-upload>
+
+      <!-- 并发上限 -->
+      <div class="concurrency-field" style="margin-top: 20px">
+        <label class="concurrency-label">{{ t("keys.concurrencyLimit") }}</label>
+        <n-input-number
+          v-model:value="concurrencyLimit"
+          :min="0"
+          :step="1"
+          style="width: 200px"
+        />
+        <div class="concurrency-hint">{{ t("keys.concurrencyLimitHint") }}</div>
+      </div>
 
       <template #footer>
         <div style="display: flex; justify-content: space-between; align-items: center">
@@ -238,6 +252,23 @@ function isSubmitDisabled() {
 .upload-hint {
   margin-top: 8px;
   font-size: 14px;
+  color: #999;
+}
+
+.concurrency-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.concurrency-label {
+  font-size: 14px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.concurrency-hint {
+  font-size: 12px;
   color: #999;
 }
 </style>

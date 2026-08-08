@@ -65,6 +65,8 @@ func (s *Server) findGroupByID(c *gin.Context, groupID uint) (*models.Group, boo
 type KeyTextRequest struct {
 	GroupID  uint   `json:"group_id" binding:"required"`
 	KeysText string `json:"keys_text" binding:"required"`
+	// ConcurrencyLimit 为每个新 key 的并发上限，0 表示智能策略（不限制，依赖 429 自动切换）。
+	ConcurrencyLimit int64 `json:"concurrency_limit,omitempty"`
 }
 
 // GroupIDRequest defines a generic payload for operations requiring only a group ID.
@@ -94,7 +96,7 @@ func (s *Server) AddMultipleKeys(c *gin.Context) {
 		return
 	}
 
-	result, err := s.KeyService.AddMultipleKeys(req.GroupID, req.KeysText)
+	result, err := s.KeyService.AddMultipleKeys(req.GroupID, req.KeysText, req.ConcurrencyLimit)
 	if err != nil {
 		if strings.Contains(err.Error(), "batch size exceeds the limit") {
 			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, err.Error()))
@@ -113,6 +115,7 @@ func (s *Server) AddMultipleKeys(c *gin.Context) {
 func (s *Server) AddMultipleKeysAsync(c *gin.Context) {
 	var groupID uint
 	var keysText string
+	var concurrencyLimit int64
 
 	// Check content type to determine if it's a file upload or JSON request
 	contentType := c.ContentType()
@@ -131,6 +134,16 @@ func (s *Server) AddMultipleKeysAsync(c *gin.Context) {
 			return
 		}
 		groupID = uint(groupIDInt)
+
+		// 并发上限（可选，0 = 智能策略）
+		if limitStr := c.PostForm("concurrency_limit"); limitStr != "" {
+			limit, err := strconv.ParseInt(limitStr, 10, 64)
+			if err != nil || limit < 0 {
+				response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, "invalid concurrency_limit, must be >= 0"))
+				return
+			}
+			concurrencyLimit = limit
+		}
 
 		// Get uploaded file
 		file, err := c.FormFile("file")
@@ -170,6 +183,11 @@ func (s *Server) AddMultipleKeysAsync(c *gin.Context) {
 		}
 		groupID = req.GroupID
 		keysText = req.KeysText
+		concurrencyLimit = req.ConcurrencyLimit
+		if concurrencyLimit < 0 {
+			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, "invalid concurrency_limit, must be >= 0"))
+			return
+		}
 	}
 
 	group, ok := s.findGroupByID(c, groupID)
@@ -181,7 +199,7 @@ func (s *Server) AddMultipleKeysAsync(c *gin.Context) {
 		return
 	}
 
-	taskStatus, err := s.KeyImportService.StartImportTask(group, keysText)
+	taskStatus, err := s.KeyImportService.StartImportTask(group, keysText, concurrencyLimit)
 	if err != nil {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrTaskInProgress, err.Error()))
 		return
@@ -233,6 +251,13 @@ func (s *Server) ListKeysInGroup(c *gin.Context) {
 		}
 	}
 	paginatedResult.Items = keys
+
+	// Attach current in-flight request counts for concurrency-aware display
+	if keysList, ok := paginatedResult.Items.([]models.APIKey); ok {
+		for i := range keysList {
+			keysList[i].InFlight = s.KeyService.KeyProvider.InFlightCount(keysList[i].ID)
+		}
+	}
 
 	response.Success(c, paginatedResult)
 }
@@ -538,6 +563,60 @@ func (s *Server) UpdateKeyNotes(c *gin.Context) {
 
 	// Update notes
 	if err := s.DB.Model(&key).Update("notes", req.Notes).Error; err != nil {
+		response.Error(c, app_errors.ParseDBError(err))
+		return
+	}
+
+	response.Success(c, nil)
+}
+
+// UpdateKeyConcurrencyLimitRequest defines the payload for updating a key's concurrency limit.
+type UpdateKeyConcurrencyLimitRequest struct {
+	// ConcurrencyLimit 为并发上限，0 表示智能策略（不限制，依赖 429 自动切换）。
+	ConcurrencyLimit int64 `json:"concurrency_limit"`
+}
+
+// UpdateKeyConcurrencyLimit handles updating the concurrency limit of a specific API key.
+func (s *Server) UpdateKeyConcurrencyLimit(c *gin.Context) {
+	keyIDStr := c.Param("id")
+	keyID, err := strconv.Atoi(keyIDStr)
+	if err != nil || keyID <= 0 {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "invalid key ID format"))
+		return
+	}
+
+	var req UpdateKeyConcurrencyLimitRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+		return
+	}
+
+	if req.ConcurrencyLimit < 0 {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, "concurrency_limit must be >= 0"))
+		return
+	}
+
+	// Check if the key exists
+	var key models.APIKey
+	if err := s.DB.First(&key, keyID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			response.Error(c, app_errors.ErrResourceNotFound)
+		} else {
+			response.Error(c, app_errors.ParseDBError(err))
+		}
+		return
+	}
+
+	// Update the concurrency limit in DB
+	if err := s.DB.Model(&key).Update("concurrency_limit", req.ConcurrencyLimit).Error; err != nil {
+		response.Error(c, app_errors.ParseDBError(err))
+		return
+	}
+
+	// Sync to the store cache so SelectKey takes effect immediately
+	key.ConcurrencyLimit = req.ConcurrencyLimit
+	if err := s.KeyService.KeyProvider.UpdateConcurrencyLimitInStore(&key); err != nil {
+		logrus.WithFields(logrus.Fields{"keyID": keyID, "error": err}).Error("Failed to sync concurrency limit to store")
 		response.Error(c, app_errors.ParseDBError(err))
 		return
 	}

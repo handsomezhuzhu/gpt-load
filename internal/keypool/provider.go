@@ -11,6 +11,8 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -22,6 +24,11 @@ type KeyProvider struct {
 	store           store.Store
 	settingsManager *config.SystemSettingsManager
 	encryptionSvc   encryption.Service
+
+	// inflight 记录每个 key 当前进行中的请求数（进程内原子计数，单实例代理）。
+	// 用于实现 key 级并发上限：达到上限的 key 在 SelectKey 时被跳过，
+	// 请求结束（成功/失败/重试/流式写完）后通过 ReleaseKey 释放槽位。
+	inflight sync.Map // key: uint -> *atomic.Int64
 }
 
 // CooldownUntilField is the hash field storing the unix timestamp until which
@@ -47,63 +54,136 @@ func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemS
 //   - KeySelectionStrategyFillFirst: 填充策略，持续取列表头部的密钥（不轮换），
 //     直到该密钥失败达到黑名单阈值被移除后，才自然切换到下一个密钥。
 //   - 其他值（默认）: 轮询策略，每次请求轮换到下一个密钥。
+//
+// 并发感知：concurrency_limit > 0 的 key 在 in-flight 达到上限时会被跳过，
+// 智能路由到下一个有空位的 key（fill_first 从头扫描，round_robin 轮换跳过）。
+// 组内所有 key 均达到上限时返回 ErrAllKeysBusy（HTTP 429）。
+// 注意：返回的 key 已占用一个并发槽位，调用方必须在请求结束（含重试/失败）后调用 ReleaseKey 释放。
 func (p *KeyProvider) SelectKey(groupID uint, strategy string) (*models.APIKey, error) {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 
-	var keyIDStr string
-	var err error
-	if strategy == models.KeySelectionStrategyFillFirst {
-		// Fill-first: peek the head of the list without rotating.
-		keyIDStr, err = p.store.LFirst(activeKeysListKey)
-	} else {
-		// Round-robin: atomically rotate the key ID from the list
-		keyIDStr, err = p.store.Rotate(activeKeysListKey)
-	}
+	length, err := p.store.LLen(activeKeysListKey)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, app_errors.ErrNoActiveKeys
+		return nil, fmt.Errorf("failed to get active key list length: %w", err)
+	}
+	if length == 0 {
+		return nil, app_errors.ErrNoActiveKeys
+	}
+
+	// 至多扫描/轮换列表长度次：fill_first 从头到尾找第一个有空位的 key，
+	// round_robin 每次 Rotate 到下一个 key，期间跳过达到并发上限的 key。
+	for attempt := int64(0); attempt < length; attempt++ {
+		var keyIDStr string
+		if strategy == models.KeySelectionStrategyFillFirst {
+			// Fill-first: peek from the head without rotating.
+			keyIDStr, err = p.store.LIndex(activeKeysListKey, attempt)
+		} else {
+			// Round-robin: atomically rotate the key ID from the list.
+			keyIDStr, err = p.store.Rotate(activeKeysListKey)
 		}
-		return nil, fmt.Errorf("failed to rotate key from store: %w", err)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, app_errors.ErrNoActiveKeys
+			}
+			return nil, fmt.Errorf("failed to read key from store: %w", err)
+		}
+
+		keyID, err := strconv.ParseUint(keyIDStr, 10, 64)
+		if err != nil {
+			logrus.WithField("keyIDStr", keyIDStr).Warn("Failed to parse key ID from active list, skipping")
+			continue
+		}
+
+		// 2. Get key details from HASH
+		keyHashKey := fmt.Sprintf("key:%d", keyID)
+		keyDetails, err := p.store.HGetAll(keyHashKey)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{"keyID": keyID, "error": err}).Warn("Failed to get key details, skipping")
+			continue
+		}
+
+		// 3. 并发感知：limit > 0 且 in-flight 已满时跳过该 key，路由到下一个。
+		limit, _ := strconv.ParseInt(keyDetails["concurrency_limit"], 10, 64)
+		if limit > 0 && !p.acquireSlot(uint(keyID), limit) {
+			logrus.WithFields(logrus.Fields{"keyID": keyID, "limit": limit}).Debug("Key is at concurrency limit, trying next key")
+			continue
+		}
+
+		// 4. Manually unmarshal the map into an APIKey struct
+		failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
+		createdAt, _ := strconv.ParseInt(keyDetails["created_at"], 10, 64)
+
+		// Decrypt the key value for use by channels
+		encryptedKeyValue := keyDetails["key_string"]
+		decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
+		if err != nil {
+			// If decryption fails, try to use the value as-is (backward compatibility for unencrypted keys)
+			logrus.WithFields(logrus.Fields{
+				"keyID": keyID,
+				"error": err,
+			}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
+			decryptedKeyValue = encryptedKeyValue
+		}
+
+		apiKey := &models.APIKey{
+			ID:               uint(keyID),
+			KeyValue:         decryptedKeyValue,
+			Status:           keyDetails["status"],
+			FailureCount:     failureCount,
+			GroupID:          groupID,
+			ConcurrencyLimit: limit,
+			CreatedAt:        time.Unix(createdAt, 0),
+		}
+
+		return apiKey, nil
 	}
 
-	keyID, err := strconv.ParseUint(keyIDStr, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse key ID '%s': %w", keyIDStr, err)
+	// 所有 key 都达到了并发上限（且没有 limit=0 的智能策略 key 兜底）
+	return nil, app_errors.ErrAllKeysBusy
+}
+
+// acquireSlot 尝试为 key 占用一个并发槽位。
+// limit <= 0 表示智能策略（不设硬性上限），永远返回 true。
+// limit > 0 时原子自增并检查是否超限，超限则回滚并返回 false。
+func (p *KeyProvider) acquireSlot(keyID uint, limit int64) bool {
+	if limit <= 0 {
+		return true
 	}
-
-	// 2. Get key details from HASH
-	keyHashKey := fmt.Sprintf("key:%d", keyID)
-	keyDetails, err := p.store.HGetAll(keyHashKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get key details for key ID %d: %w", keyID, err)
+	raw, _ := p.inflight.LoadOrStore(keyID, new(atomic.Int64))
+	counter := raw.(*atomic.Int64)
+	cur := counter.Add(1)
+	if cur > limit {
+		counter.Add(-1)
+		return false
 	}
+	return true
+}
 
-	// 3. Manually unmarshal the map into an APIKey struct
-	failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
-	createdAt, _ := strconv.ParseInt(keyDetails["created_at"], 10, 64)
-
-	// Decrypt the key value for use by channels
-	encryptedKeyValue := keyDetails["key_string"]
-	decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
-	if err != nil {
-		// If decryption fails, try to use the value as-is (backward compatibility for unencrypted keys)
-		logrus.WithFields(logrus.Fields{
-			"keyID": keyID,
-			"error": err,
-		}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
-		decryptedKeyValue = encryptedKeyValue
+// ReleaseKey 释放 key 的一个并发槽位，必须在请求结束（成功/失败/重试/流式写完）后调用。
+func (p *KeyProvider) ReleaseKey(keyID uint) {
+	raw, ok := p.inflight.Load(keyID)
+	if !ok {
+		return
 	}
-
-	apiKey := &models.APIKey{
-		ID:           uint(keyID),
-		KeyValue:     decryptedKeyValue,
-		Status:       keyDetails["status"],
-		FailureCount: failureCount,
-		GroupID:      groupID,
-		CreatedAt:    time.Unix(createdAt, 0),
+	counter := raw.(*atomic.Int64)
+	for {
+		cur := counter.Load()
+		if cur <= 0 {
+			return
+		}
+		if counter.CompareAndSwap(cur, cur-1) {
+			return
+		}
 	}
+}
 
-	return apiKey, nil
+// InFlightCount 返回 key 当前进行中的请求数（用于管理界面展示）。
+func (p *KeyProvider) InFlightCount(keyID uint) int64 {
+	raw, ok := p.inflight.Load(keyID)
+	if !ok {
+		return 0
+	}
+	return raw.(*atomic.Int64).Load()
 }
 
 // BlacklistKeyImmediately 同步地将密钥从活跃池中移除并标记为冷却/无效。
@@ -712,19 +792,30 @@ func (p *KeyProvider) removeKeyFromStore(keyID, groupID uint) error {
 	if err := p.store.Delete(keyHashKey); err != nil {
 		return fmt.Errorf("failed to delete key HASH for key %d: %w", keyID, err)
 	}
+
+	// 清理并发计数器（仍有进行中请求时计数自然失效，ReleaseKey 有下限保护）
+	p.inflight.Delete(keyID)
 	return nil
+}
+
+// UpdateConcurrencyLimitInStore 同步更新 key 缓存中的并发上限字段。
+// SelectKey 从 store 读取 concurrency_limit，因此修改后必须同步缓存才能立即生效。
+func (p *KeyProvider) UpdateConcurrencyLimitInStore(key *models.APIKey) error {
+	keyHashKey := fmt.Sprintf("key:%d", key.ID)
+	return p.store.HSet(keyHashKey, map[string]any{"concurrency_limit": key.ConcurrencyLimit})
 }
 
 // apiKeyToMap converts an APIKey model to a map for HSET.
 func (p *KeyProvider) apiKeyToMap(key *models.APIKey) map[string]any {
 	return map[string]any{
-		"id":             fmt.Sprint(key.ID),
-		"key_string":     key.KeyValue,
-		"status":         key.Status,
-		"failure_count":  key.FailureCount,
-		"group_id":       key.GroupID,
-		"created_at":     key.CreatedAt.Unix(),
-		"cooldown_until": key.CooldownUntil,
+		"id":                fmt.Sprint(key.ID),
+		"key_string":        key.KeyValue,
+		"status":            key.Status,
+		"failure_count":     key.FailureCount,
+		"group_id":          key.GroupID,
+		"created_at":        key.CreatedAt.Unix(),
+		"cooldown_until":    key.CooldownUntil,
+		"concurrency_limit": key.ConcurrencyLimit,
 	}
 }
 

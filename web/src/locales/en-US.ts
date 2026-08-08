@@ -443,6 +443,12 @@ export default {
     onlyTxtFileSupported: "Only .txt files are supported",
     fileImportedSuccessfully: "File imported successfully",
     fileReadError: "Failed to read file",
+    concurrencyLimit: "Concurrency limit",
+    concurrencyLimitHint:
+      "0 = Smart strategy (no hard cap; automatically switches to another key on 429); >0 = hard cap, routes to other keys when reached",
+    concurrencyLimitUpdated: "Concurrency limit updated",
+    editConcurrencyLimit: "Edit concurrency limit",
+    concurrencySmart: "Smart",
   },
   subGroups: {
     addSubGroup: "Add Sub Group",

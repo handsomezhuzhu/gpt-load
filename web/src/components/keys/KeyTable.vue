@@ -22,6 +22,7 @@ import {
   NEmpty,
   NIcon,
   NInput,
+  NInputNumber,
   NModal,
   NSelect,
   NSpace,
@@ -99,6 +100,44 @@ const deleteDialogShow = ref(false);
 const notesDialogShow = ref(false);
 const editingKey = ref<KeyRow | null>(null);
 const editingNotes = ref("");
+
+// 并发上限编辑相关
+const concurrencyDialogShow = ref(false);
+const editingConcurrencyLimit = ref<number>(0);
+
+// 并发占用展示：limit=0 显示智能策略，否则显示 in_flight/limit
+function getConcurrencyDisplay(key: KeyRow): string {
+  const limit = key.concurrency_limit || 0;
+  if (limit <= 0) {
+    return t("keys.concurrencySmart");
+  }
+  const inflight = key.in_flight || 0;
+  return `${inflight}/${limit}`;
+}
+
+// 编辑并发上限
+function editKeyConcurrencyLimit(key: KeyRow) {
+  editingKey.value = key;
+  editingConcurrencyLimit.value = key.concurrency_limit || 0;
+  concurrencyDialogShow.value = true;
+}
+
+// 保存并发上限
+async function saveKeyConcurrencyLimit() {
+  if (!editingKey.value) {
+    return;
+  }
+
+  const limit = Math.max(0, Math.floor(editingConcurrencyLimit.value || 0));
+  try {
+    await keysApi.updateKeyConcurrencyLimit(editingKey.value.id, limit);
+    editingKey.value.concurrency_limit = limit;
+    window.$message.success(t("keys.concurrencyLimitUpdated"));
+    concurrencyDialogShow.value = false;
+  } catch (error) {
+    console.error("Update concurrency limit failed", error);
+  }
+}
 
 watch(
   () => props.selectedGroup,
@@ -782,6 +821,14 @@ function resetPage() {
                   {{ t("keys.failuresShort") }}
                   <strong>{{ key.failure_count }}</strong>
                 </span>
+                <span
+                  class="stat-item concurrency-badge"
+                  :class="{ 'concurrency-smart': !(key.concurrency_limit || 0) }"
+                  :title="t('keys.editConcurrencyLimit')"
+                  @click="editKeyConcurrencyLimit(key)"
+                >
+                  {{ getConcurrencyDisplay(key) }}
+                </span>
                 <span class="stat-item">
                   {{ key.last_used_at ? formatRelativeTime(key.last_used_at) : t("keys.unused") }}
                 </span>
@@ -891,6 +938,21 @@ function resetPage() {
     <template #action>
       <n-button @click="notesDialogShow = false">{{ t("common.cancel") }}</n-button>
       <n-button type="primary" @click="saveKeyNotes">{{ t("common.save") }}</n-button>
+    </template>
+  </n-modal>
+
+  <!-- 并发上限编辑对话框 -->
+  <n-modal v-model:show="concurrencyDialogShow" preset="dialog" :title="t('keys.editConcurrencyLimit')">
+    <n-input-number
+      v-model:value="editingConcurrencyLimit"
+      :min="0"
+      :step="1"
+      style="width: 200px"
+    />
+    <div class="concurrency-dialog-hint">{{ t("keys.concurrencyLimitHint") }}</div>
+    <template #action>
+      <n-button @click="concurrencyDialogShow = false">{{ t("common.cancel") }}</n-button>
+      <n-button type="primary" @click="saveKeyConcurrencyLimit">{{ t("common.save") }}</n-button>
     </template>
   </n-modal>
 </template>
@@ -1159,6 +1221,32 @@ function resetPage() {
 .stat-item strong {
   color: var(--text-primary);
   font-weight: 600;
+}
+
+/* 并发占用徽标（可点击编辑） */
+.concurrency-badge {
+  cursor: pointer;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--bg-color-muted, rgba(128, 128, 128, 0.12));
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  transition: background 0.2s;
+}
+
+.concurrency-badge:hover {
+  background: var(--primary-color-hover, rgba(24, 160, 88, 0.2));
+}
+
+.concurrency-badge.concurrency-smart {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.concurrency-dialog-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .key-actions {

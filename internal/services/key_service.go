@@ -59,8 +59,9 @@ func NewKeyService(db *gorm.DB, keyProvider *keypool.KeyProvider, keyValidator *
 }
 
 // AddMultipleKeys handles the business logic of creating new keys from a text block.
+// concurrencyLimit 为每个新 key 的并发上限，0 表示智能策略（不限制，依赖 429 自动切换）。
 // deprecated: use KeyImportService for large imports
-func (s *KeyService) AddMultipleKeys(groupID uint, keysText string) (*AddKeysResult, error) {
+func (s *KeyService) AddMultipleKeys(groupID uint, keysText string, concurrencyLimit int64) (*AddKeysResult, error) {
 	keys := s.ParseKeysFromText(keysText)
 	if len(keys) > maxRequestKeys {
 		return nil, fmt.Errorf("batch size exceeds the limit of %d keys, got %d", maxRequestKeys, len(keys))
@@ -69,7 +70,7 @@ func (s *KeyService) AddMultipleKeys(groupID uint, keysText string) (*AddKeysRes
 		return nil, fmt.Errorf("no valid keys found in the input text")
 	}
 
-	addedCount, ignoredCount, err := s.processAndCreateKeys(groupID, keys, nil)
+	addedCount, ignoredCount, err := s.processAndCreateKeys(groupID, keys, uniformConcurrencyLimits(keys, concurrencyLimit), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -86,10 +87,26 @@ func (s *KeyService) AddMultipleKeys(groupID uint, keysText string) (*AddKeysRes
 	}, nil
 }
 
+// uniformConcurrencyLimits builds a per-key concurrency limit map where every key
+// shares the same limit. Returns nil when limit == 0 (smart strategy default).
+func uniformConcurrencyLimits(keys []string, limit int64) map[string]int64 {
+	if limit <= 0 {
+		return nil
+	}
+	limits := make(map[string]int64, len(keys))
+	for _, key := range keys {
+		limits[strings.TrimSpace(key)] = limit
+	}
+	return limits
+}
+
 // processAndCreateKeys is the lowest-level reusable function for adding keys.
+// limitsByKey 为每个 key（trimmed value）的并发上限，缺失时默认为 0（智能策略，
+// 不限制，依赖 429 自动切换）。
 func (s *KeyService) processAndCreateKeys(
 	groupID uint,
 	keys []string,
+	limitsByKey map[string]int64,
 	progressCallback func(processed int),
 ) (addedCount int, ignoredCount int, err error) {
 	// 1. Get existing key hashes in the group for deduplication
@@ -126,10 +143,11 @@ func (s *KeyService) processAndCreateKeys(
 
 		uniqueNewKeys[trimmedKey] = true
 		newKeysToCreate = append(newKeysToCreate, models.APIKey{
-			GroupID:  groupID,
-			KeyValue: encryptedKey,
-			KeyHash:  keyHash,
-			Status:   models.KeyStatusActive,
+			GroupID:          groupID,
+			KeyValue:         encryptedKey,
+			KeyHash:          keyHash,
+			Status:           models.KeyStatusActive,
+			ConcurrencyLimit: limitsByKey[trimmedKey],
 		})
 	}
 

@@ -325,6 +325,37 @@ func (s *MemoryStore) LFirst(key string) (string, error) {
 	return list[0], nil
 }
 
+// LIndex returns the element at the given index of a list.
+// Index 0 is the head of the list; negative indexes count from the tail.
+func (s *MemoryStore) LIndex(key string, index int64) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rawList, exists := s.data[key]
+	if !exists {
+		return "", ErrNotFound
+	}
+
+	list, ok := rawList.([]string)
+	if !ok {
+		return "", fmt.Errorf("type mismatch: key '%s' holds a different data type", key)
+	}
+
+	if len(list) == 0 {
+		return "", ErrNotFound
+	}
+
+	idx := int(index)
+	if idx < 0 {
+		idx = len(list) + idx
+	}
+	if idx < 0 || idx >= len(list) {
+		return "", ErrNotFound
+	}
+
+	return list[idx], nil
+}
+
 // LLen returns the length of a list.
 func (s *MemoryStore) LLen(key string) (int64, error) {
 	s.mu.RLock()

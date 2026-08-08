@@ -50,6 +50,7 @@ type Store interface {
 	LRem(key string, count int64, value any) error
 	Rotate(key string) (string, error)
 	LFirst(key string) (string, error)
+	LIndex(key string, index int64) (string, error)
 	LLen(key string) (int64, error)
 
 	// SET operations

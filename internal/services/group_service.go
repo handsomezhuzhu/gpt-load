@@ -600,6 +600,7 @@ func (s *GroupService) CopyGroup(ctx context.Context, sourceGroupID uint, copyKe
 	}
 
 	var sourceKeyValues []string
+	limitsByKey := make(map[string]int64)
 	if option != "none" {
 		var sourceKeys []models.APIKey
 		query := tx.Where("group_id = ?", sourceGroupID)
@@ -617,6 +618,10 @@ func (s *GroupService) CopyGroup(ctx context.Context, sourceGroupID uint, copyKe
 				continue
 			}
 			sourceKeyValues = append(sourceKeyValues, decryptedKey)
+			// 保留每个 key 的并发上限配置
+			if sourceKey.ConcurrencyLimit > 0 {
+				limitsByKey[decryptedKey] = sourceKey.ConcurrencyLimit
+			}
 		}
 	}
 
@@ -630,8 +635,7 @@ func (s *GroupService) CopyGroup(ctx context.Context, sourceGroupID uint, copyKe
 	}
 
 	if len(sourceKeyValues) > 0 {
-		keysText := strings.Join(sourceKeyValues, "\n")
-		if _, err := s.keyImportSvc.StartImportTask(&newGroup, keysText); err != nil {
+		if _, err := s.keyImportSvc.StartImportTaskFromKeys(&newGroup, sourceKeyValues, limitsByKey); err != nil {
 			logrus.WithContext(ctx).WithFields(logrus.Fields{
 				"groupId":  newGroup.ID,
 				"keyCount": len(sourceKeyValues),

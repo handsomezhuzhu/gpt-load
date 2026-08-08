@@ -24,6 +24,8 @@ export interface APIKey {
   request_count: number;
   failure_count: number;
   cooldown_until?: number;
+  concurrency_limit?: number;
+  in_flight?: number;
   last_used_at?: string;
   created_at: string;
   updated_at: string;

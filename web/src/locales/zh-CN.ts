@@ -427,6 +427,11 @@ export default {
     onlyTxtFileSupported: "仅支持 .txt 文件",
     fileImportedSuccessfully: "文件导入成功",
     fileReadError: "文件读取失败",
+    concurrencyLimit: "并发上限",
+    concurrencyLimitHint: "0 = 智能策略（不限制并发，收到 429 时自动切换其他 key）；>0 = 硬性上限，达到后智能路由到其他 key",
+    concurrencyLimitUpdated: "并发上限已更新",
+    editConcurrencyLimit: "编辑并发上限",
+    concurrencySmart: "智能",
   },
   subGroups: {
     addSubGroup: "添加子分组",

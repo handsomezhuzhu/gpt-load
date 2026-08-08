@@ -113,8 +113,13 @@ export const keysApi = {
   },
 
   // 异步批量添加密钥
-  async addKeysAsync(group_id: number, keys_text?: string, file?: File): Promise<TaskInfo> {
-    let requestData: FormData | { group_id: number; keys_text: string };
+  async addKeysAsync(
+    group_id: number,
+    keys_text?: string,
+    file?: File,
+    concurrencyLimit?: number
+  ): Promise<TaskInfo> {
+    let requestData: FormData | { group_id: number; keys_text: string; concurrency_limit?: number };
     const config: { hideMessage: boolean; headers?: { "Content-Type": string } } = {
       hideMessage: true,
     };
@@ -124,11 +129,18 @@ export const keysApi = {
       const formData = new FormData();
       formData.append("group_id", group_id.toString());
       formData.append("file", file);
+      if (concurrencyLimit !== undefined) {
+        formData.append("concurrency_limit", concurrencyLimit.toString());
+      }
       requestData = formData;
       config.headers = { "Content-Type": "multipart/form-data" };
     } else {
       // Text input mode
-      requestData = { group_id, keys_text: keys_text || "" };
+      requestData = {
+        group_id,
+        keys_text: keys_text || "",
+        concurrency_limit: concurrencyLimit,
+      };
     }
 
     const res = await http.post("/keys/add-async", requestData, config);
@@ -138,6 +150,15 @@ export const keysApi = {
   // 更新密钥备注
   async updateKeyNotes(keyId: number, notes: string): Promise<void> {
     await http.put(`/keys/${keyId}/notes`, { notes }, { hideMessage: true });
+  },
+
+  // 更新密钥并发上限（0 = 智能策略）
+  async updateKeyConcurrencyLimit(keyId: number, concurrencyLimit: number): Promise<void> {
+    await http.put(
+      `/keys/${keyId}/concurrency-limit`,
+      { concurrency_limit: concurrencyLimit },
+      { hideMessage: true }
+    );
   },
 
   // 测试密钥

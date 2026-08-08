@@ -128,11 +128,31 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 	apiKey, err := ps.keyProvider.SelectKey(group.ID, group.EffectiveConfig.KeySelectionStrategy)
 	if err != nil {
+		// 所有 key 均达到并发上限：返回 429 + Retry-After，由客户端重试
+		// （与 CLIProxyAPI 的 credential_concurrency_exceeded 语义一致）。
+		if errors.Is(err, app_errors.ErrAllKeysBusy) {
+			c.Header("Retry-After", "1")
+			response.Error(c, app_errors.NewAPIError(app_errors.ErrAllKeysBusy, err.Error()))
+			ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusTooManyRequests, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
+			return
+		}
+
 		logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, err.Error()))
 		ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
 		return
 	}
+
+	// SelectKey 成功即占用了该 key 的一个并发槽位，请求结束（成功/失败/流式写完）时释放。
+	// 重试递归前会提前释放当前尝试的槽位，使失败过的 key 尽快恢复可选。
+	var slotReleased bool
+	releaseSlot := func() {
+		if !slotReleased {
+			slotReleased = true
+			ps.keyProvider.ReleaseKey(apiKey.ID)
+		}
+	}
+	defer releaseSlot()
 
 	upstreamURL, err := channelHandler.BuildUpstreamURL(c.Request.URL, originalGroup.Name)
 	if err != nil {
@@ -274,6 +294,8 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			return
 		}
 
+		// 本次尝试结束，提前释放槽位，再进入重试递归
+		releaseSlot()
 		ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, bodyBytes, isStream, startTime, retryCount+1)
 		return
 	}

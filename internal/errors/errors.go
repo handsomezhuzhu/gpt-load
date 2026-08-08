@@ -38,6 +38,9 @@ var (
 	ErrNoActiveKeys       = &APIError{HTTPStatus: http.StatusServiceUnavailable, Code: "NO_ACTIVE_KEYS", Message: "No active API keys available for this group"}
 	ErrMaxRetriesExceeded = &APIError{HTTPStatus: http.StatusBadGateway, Code: "MAX_RETRIES_EXCEEDED", Message: "Request failed after maximum retries"}
 	ErrNoKeysAvailable    = &APIError{HTTPStatus: http.StatusServiceUnavailable, Code: "NO_KEYS_AVAILABLE", Message: "No API keys available to process the request"}
+	// ErrAllKeysBusy 表示组内所有 key 均达到并发上限（in-flight >= concurrency_limit），
+	// 客户端应在 Retry-After 后重试（与 CLIProxyAPI 的 credential_concurrency_exceeded 语义一致）。
+	ErrAllKeysBusy = &APIError{HTTPStatus: http.StatusTooManyRequests, Code: "ALL_KEYS_BUSY", Message: "All keys have reached their concurrency limit, please retry later"}
 )
 
 // NewAPIError creates a new APIError with a custom message.

@@ -135,6 +135,19 @@ func (s *RedisStore) LFirst(key string) (string, error) {
 	return val, nil
 }
 
+// LIndex returns the element at the given index of a list.
+// Index 0 is the head of the list; negative indexes count from the tail.
+func (s *RedisStore) LIndex(key string, index int64) (string, error) {
+	val, err := s.client.LIndex(context.Background(), s.prefixKey(key), index).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return val, nil
+}
+
 // LLen returns the length of a list.
 func (s *RedisStore) LLen(key string) (int64, error) {
 	return s.client.LLen(context.Background(), s.prefixKey(key)).Result()

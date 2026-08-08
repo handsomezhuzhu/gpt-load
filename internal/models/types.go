@@ -134,9 +134,15 @@ type APIKey struct {
 	FailureCount int64      `gorm:"not null;default:0" json:"failure_count"`
 	LastUsedAt   *time.Time `gorm:"index:idx_api_keys_group_last_used_id,priority:2" json:"last_used_at"`
 	// CooldownUntil 为 unix 秒时间戳，密钥处于 cooldown 状态时的冷却截止时间，0 表示无冷却
-	CooldownUntil int64     `gorm:"not null;default:0" json:"cooldown_until"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	CooldownUntil int64 `gorm:"not null;default:0" json:"cooldown_until"`
+	// ConcurrencyLimit 为密钥的并发请求上限，0 表示智能策略（不设硬性上限，
+	// 依赖 429 自动切换 + 冷却机制），>0 表示硬性上限，in-flight 达到上限时
+	// 智能路由到其他有空位的密钥。
+	ConcurrencyLimit int64     `gorm:"not null;default:0" json:"concurrency_limit"`
+	// InFlight 为 key 当前进行中的请求数（进程内运行时统计，不入库，仅用于管理界面展示）
+	InFlight int64     `gorm:"-" json:"in_flight"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // RequestType 请求类型常量

@@ -442,7 +442,13 @@ export default {
     clickOrDragFile: "アップロードをクリック",
     onlyTxtFileSupported: ".txt ファイルのみサポート",
     fileImportedSuccessfully: "ファイルのインポートに成功しました",
-    fileReadError: "ファイルの読み取りに失敗しました",
+    fileReadError: "ファイルの読み込みに失敗しました",
+    concurrencyLimit: "同時実行上限",
+    concurrencyLimitHint:
+      "0 = スマート戦略（上限なし。429 受信時に他のキーへ自動切替）；>0 = ハード上限。到達すると他のキーへルーティング",
+    concurrencyLimitUpdated: "同時実行上限を更新しました",
+    editConcurrencyLimit: "同時実行上限を編集",
+    concurrencySmart: "スマート",
   },
   subGroups: {
     addSubGroup: "サブグループを追加",
