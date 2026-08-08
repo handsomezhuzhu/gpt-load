@@ -428,7 +428,10 @@ export default {
     fileImportedSuccessfully: "文件导入成功",
     fileReadError: "文件读取失败",
     concurrencyLimit: "并发上限",
-    concurrencyLimitHint: "0 = 智能策略（不限制并发，收到 429 时自动切换其他 key）；>0 = 硬性上限，达到后智能路由到其他 key",
+    concurrencyLimitHint:
+      "0 = 跟随分组默认（未设置时智能策略，收到 429 自动切换其他 key）；>0 = 硬性上限，达到后智能路由到其他 key",
+    concurrencyLimitEffectiveHint:
+      "当前生效值：{limit}（来自分组默认）。设置 0 可恢复跟随分组默认。",
     concurrencyLimitGroupHint:
       "0 = 不设置（每个 key 使用自己的配置/智能策略）；>0 = 组内未单独设置并发上限的 key 统一使用该值，达到后智能路由到其他 key",
     concurrencyLimitUpdated: "并发上限已更新",

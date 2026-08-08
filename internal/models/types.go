@@ -143,9 +143,12 @@ type APIKey struct {
 	// 智能路由到其他有空位的密钥。
 	ConcurrencyLimit int64     `gorm:"not null;default:0" json:"concurrency_limit"`
 	// InFlight 为 key 当前进行中的请求数（进程内运行时统计，不入库，仅用于管理界面展示）
-	InFlight int64     `gorm:"-" json:"in_flight"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	InFlight int64 `gorm:"-" json:"in_flight"`
+	// EffectiveConcurrencyLimit 为 key 生效的并发上限（自身配置 > 分组默认 > 0 智能策略），
+	// 仅用于管理界面展示，不入库
+	EffectiveConcurrencyLimit int64     `gorm:"-" json:"effective_concurrency_limit"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
 // RequestType 请求类型常量

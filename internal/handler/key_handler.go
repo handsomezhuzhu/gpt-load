@@ -215,7 +215,8 @@ func (s *Server) ListKeysInGroup(c *gin.Context) {
 		return
 	}
 
-	if _, ok := s.findGroupByID(c, groupID); !ok {
+	group, ok := s.findGroupByID(c, groupID)
+	if !ok {
 		return
 	}
 
@@ -252,10 +253,19 @@ func (s *Server) ListKeysInGroup(c *gin.Context) {
 	}
 	paginatedResult.Items = keys
 
-	// Attach current in-flight request counts for concurrency-aware display
+	// Attach current in-flight request counts and effective concurrency limits.
+	// Effective limit = key's own concurrency_limit (>0 wins), otherwise the
+	// group's default key_concurrency_limit, otherwise 0 (smart strategy).
+	effectiveConfig := s.SettingsManager.GetEffectiveConfig(group.Config)
+	groupDefaultLimit := int64(effectiveConfig.KeyConcurrencyLimit)
 	if keysList, ok := paginatedResult.Items.([]models.APIKey); ok {
 		for i := range keysList {
 			keysList[i].InFlight = s.KeyService.KeyProvider.InFlightCount(keysList[i].ID)
+			if keysList[i].ConcurrencyLimit > 0 {
+				keysList[i].EffectiveConcurrencyLimit = keysList[i].ConcurrencyLimit
+			} else {
+				keysList[i].EffectiveConcurrencyLimit = groupDefaultLimit
+			}
 		}
 	}
 

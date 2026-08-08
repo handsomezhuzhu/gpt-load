@@ -105,9 +105,9 @@ const editingNotes = ref("");
 const concurrencyDialogShow = ref(false);
 const editingConcurrencyLimit = ref<number>(0);
 
-// 并发占用展示：limit=0 显示智能策略，否则显示 in_flight/limit
+// 并发占用展示：显示生效的并发上限（自身配置 > 分组默认 > 0 智能策略）
 function getConcurrencyDisplay(key: KeyRow): string {
-  const limit = key.concurrency_limit || 0;
+  const limit = key.effective_concurrency_limit ?? key.concurrency_limit ?? 0;
   if (limit <= 0) {
     return t("keys.concurrencySmart");
   }
@@ -115,7 +115,7 @@ function getConcurrencyDisplay(key: KeyRow): string {
   return `${inflight}/${limit}`;
 }
 
-// 编辑并发上限
+// 编辑并发上限（初始值显示 key 自身配置：0 = 跟随分组默认/智能策略）
 function editKeyConcurrencyLimit(key: KeyRow) {
   editingKey.value = key;
   editingConcurrencyLimit.value = key.concurrency_limit || 0;
@@ -134,6 +134,8 @@ async function saveKeyConcurrencyLimit() {
     editingKey.value.concurrency_limit = limit;
     window.$message.success(t("keys.concurrencyLimitUpdated"));
     concurrencyDialogShow.value = false;
+    // 刷新列表以同步 effective_concurrency_limit（如改回 0 时回落到分组默认）
+    await loadKeys();
   } catch (error) {
     console.error("Update concurrency limit failed", error);
   }
@@ -949,7 +951,22 @@ function resetPage() {
       :step="1"
       style="width: 200px"
     />
-    <div class="concurrency-dialog-hint">{{ t("keys.concurrencyLimitHint") }}</div>
+    <div class="concurrency-dialog-hint">
+      <template
+        v-if="
+          editingKey &&
+            !(editingKey.concurrency_limit || 0) &&
+            (editingKey.effective_concurrency_limit ?? 0) > 0
+        "
+      >
+        {{
+          t("keys.concurrencyLimitEffectiveHint", {
+            limit: editingKey.effective_concurrency_limit,
+          })
+        }}
+      </template>
+      <template v-else>{{ t("keys.concurrencyLimitHint") }}</template>
+    </div>
     <template #action>
       <n-button @click="concurrencyDialogShow = false">{{ t("common.cancel") }}</n-button>
       <n-button type="primary" @click="saveKeyConcurrencyLimit">{{ t("common.save") }}</n-button>

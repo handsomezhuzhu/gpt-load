@@ -531,7 +531,14 @@ async function handleSubmit() {
       }
     });
     config.key_selection_strategy = formData.key_selection_strategy;
-    config.key_concurrency_limit = formData.key_concurrency_limit;
+    // 并发上限仅在 >0 时写入分组配置，0 表示不设置（跟随各 key 自己的配置），
+    // 同时清除旧值，避免分组信息卡展示无意义的 0。
+    const groupConcurrencyLimit = Number(formData.key_concurrency_limit || 0);
+    if (groupConcurrencyLimit > 0) {
+      config.key_concurrency_limit = groupConcurrencyLimit;
+    } else {
+      delete config.key_concurrency_limit;
+    }
 
     // 构建提交数据
     const submitData = {

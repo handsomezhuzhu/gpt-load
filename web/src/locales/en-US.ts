@@ -445,7 +445,9 @@ export default {
     fileReadError: "Failed to read file",
     concurrencyLimit: "Concurrency limit",
     concurrencyLimitHint:
-      "0 = Smart strategy (no hard cap; automatically switches to another key on 429); >0 = hard cap, routes to other keys when reached",
+      "0 = Follow group default (smart strategy if unset; automatically switches to another key on 429); >0 = hard cap, routes to other keys when reached",
+    concurrencyLimitEffectiveHint:
+      "Effective limit: {limit} (from group default). Set to 0 to follow the group default again.",
     concurrencyLimitGroupHint:
       "0 = Unset (each key uses its own configuration/smart strategy); >0 = applied to all keys in the group without their own limit, routes to other keys when reached",
     concurrencyLimitUpdated: "Concurrency limit updated",

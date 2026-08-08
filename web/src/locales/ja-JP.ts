@@ -445,7 +445,9 @@ export default {
     fileReadError: "ファイルの読み込みに失敗しました",
     concurrencyLimit: "同時実行上限",
     concurrencyLimitHint:
-      "0 = スマート戦略（上限なし。429 受信時に他のキーへ自動切替）；>0 = ハード上限。到達すると他のキーへルーティング",
+      "0 = グループデフォルトに従う（未設定ならスマート戦略。429 受信時に他のキーへ自動切替）；>0 = ハード上限。到達すると他のキーへルーティング",
+    concurrencyLimitEffectiveHint:
+      "現在の有効値：{limit}（グループデフォルト由来）。0 に設定するとグループデフォルトに戻ります。",
     concurrencyLimitGroupHint:
       "0 = 未設定（各キーが自身の設定/スマート戦略を使用）；>0 = グループ内で独自の上限を設定していないキーに一括適用。到達すると他のキーへルーティング",
     concurrencyLimitUpdated: "同時実行上限を更新しました",
